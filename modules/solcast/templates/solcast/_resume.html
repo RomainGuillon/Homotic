@@ -1,0 +1,69 @@
+{# Courbe du jour + tableau horaire + tuiles (partagé onglet / bloc). #}
+{{ chart_today|safe }}
+<p class="small text-secondary mt-1 mb-2">
+  <span style="display:inline-block;width:12px;height:8px;background:#d9a65c;opacity:.6;border-radius:2px"></span>
+  prévision Solcast
+  {% if has_actual %}
+    · <span style="display:inline-block;width:12px;height:3px;background:#7c9bb5;vertical-align:middle"></span>
+    production
+  {% endif %}
+  {% if creneau_chauffe %}
+    · <span style="display:inline-block;width:12px;height:8px;background:#7fa88b;opacity:.5;border-radius:2px"></span>
+    créneau retenu pour le chauffe-eau ({{ creneau_chauffe.start|date:"H:i" }}–{{ creneau_chauffe.end|date:"H:i" }})
+  {% endif %}
+  · <span class="text-faint">survolez la courbe pour les valeurs</span>
+</p>
+
+{% if hourly %}
+  <div class="table-responsive">
+    <table class="table table-sm text-center small mb-2">
+      <thead>
+        <tr><th></th>{% for h in hourly %}<th>{{ h.label }}</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th class="text-start">Prévu</th>
+          {% for h in hourly %}<td>{% if h.prevision is not None %}{{ h.prevision|floatformat:1 }}{% else %}—{% endif %}</td>{% endfor %}
+        </tr>
+        <tr>
+          <th class="text-start">Réel</th>
+          {% for h in hourly %}<td>{% if h.actual is not None %}{{ h.actual|floatformat:1 }}{% else %}—{% endif %}</td>{% endfor %}
+        </tr>
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+
+<div class="row g-2">
+  <div class="col-4">
+    <div class="border rounded p-2 text-center h-100">
+      <div class="small text-secondary">Prévu aujourd'hui</div>
+      <div class="fw-bold fs-5" style="color:#f59e0b">
+        {% if s.today_kwh %}{{ s.today_kwh|floatformat:1 }} kWh{% else %}—{% endif %}</div>
+    </div>
+  </div>
+  <div class="col-4">
+    <div class="border rounded p-2 text-center h-100">
+      <div class="small text-secondary">Prévu demain</div>
+      <div class="fw-bold fs-5">
+        {% if s.tomorrow_kwh %}{{ s.tomorrow_kwh|floatformat:1 }} kWh{% else %}—{% endif %}</div>
+      {% if s.tomorrow_partiel %}
+        <div class="small text-secondary">prévision partielle · complétée à 03:00</div>
+      {% endif %}
+    </div>
+  </div>
+  <div class="col-4">
+    <div class="border rounded p-2 text-center h-100">
+      <div class="small text-secondary">Créneau chauffe-eau retenu</div>
+      {% if creneau_chauffe %}
+        <div class="fw-bold fs-5" style="color:#7fa88b">
+          {{ creneau_chauffe.start|date:"H:i" }} — {{ creneau_chauffe.end|date:"H:i" }}</div>
+        <div class="small text-secondary">{{ creneau_label }}</div>
+      {% else %}
+        <div class="fw-bold">—</div>
+        <div class="small text-secondary">chauffe de nuit, pas de calcul du jour,
+          ou source non branchée</div>
+      {% endif %}
+    </div>
+  </div>
+</div>

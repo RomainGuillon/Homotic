@@ -1,0 +1,208 @@
+{% extends "core/base.html" %}
+{% block title %}Heure démarrage — Homotic{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-1">
+  <h1 class="h4 mb-0">Heure de démarrage</h1>
+  <form method="post" class="text-end">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="recalculer">
+    <button class="btn btn-sm btn-outline-light rounded-pill px-3">
+      <i class="bi bi-arrow-clockwise me-1"></i>Recalculer
+    </button>
+    {% comment %} Le switch choisit l'arbitrage du recalcul manuel, comme le
+       paramètre de l'action de scénario. Décoché = jour, coché = nuit. Il
+       n'est pas enregistré : c'est un choix ponctuel, pas un réglage. {% endcomment %}
+    <div class="form-check form-switch d-inline-flex align-items-center gap-2 mt-2">
+      <input class="form-check-input mt-0" type="checkbox" role="switch"
+             id="arbitrage" name="arbitrage" value="nuit"
+             {% if arbitrage_defaut == "nuit" %}checked{% endif %}>
+      <label class="form-check-label small" for="arbitrage">
+        comparer avec les heures creuses
+      </label>
+    </div>
+    <div class="form-text text-end mb-0">
+      décoché : solaire seul, la nuit est passée
+    </div>
+  </form>
+</div>
+<p class="text-secondary small mb-4">Meilleur moment pour démarrer le chauffe-eau</p>
+
+{# ---------- Résultat ---------- #}
+<div class="card mb-4">
+  <div class="card-header"><i class="bi bi-clock-history me-2"></i>Résultat du calcul</div>
+  <div class="card-body">
+    <div class="row text-center mb-3">
+      <div class="col-12 col-md-4">
+        <div class="display-6 fw-bold" style="color:{% if r.mode == 'solaire' %}#f59e0b{% else %}#93c5fd{% endif %}">
+          {{ r.heure|default:"—" }}</div>
+        <div class="small text-secondary">
+          {% if r.mode == "solaire" %}Créneau solaire du jour{% else %}Heures creuses (nuit){% endif %}</div>
+        {% if r.heure_forcee %}
+          <div class="small text-warning mt-1">
+            Heure forcée dans la variable <code>heure_demarrage_chauffe_eau</code> —
+            le calcul ci-dessous avait retenu {{ r.heure_calculee|default:"—" }}.
+          </div>
+        {% endif %}
+        {% if r.quand %}
+          <div class="small text-faint mt-1">
+            calculé à {{ r.quand|date:"H:i" }}{% if r.perime %} — <span class="text-warning">la veille</span>{% endif %}
+          </div>
+        {% elif r.jamais_calcule %}
+          <div class="small text-warning mt-1">aucun calcul effectué — bouton « Recalculer »</div>
+        {% endif %}
+      </div>
+      <div class="col-6 col-md-4">
+        <div class="fs-4 fw-bold">{{ r.duree_min }}<span class="fs-6"> min</span></div>
+        <div class="small text-secondary">Durée de chauffe · saison {{ r.saison }}</div>
+      </div>
+      <div class="col-6 col-md-4">
+        <div class="fs-4 fw-bold">
+          {% if r.optimiser %}Optimisé{% else %}Solaire{% endif %}
+          {% if r.ajustement == "max" %}<span class="fs-6 text-warning">· Max</span>{% endif %}</div>
+        <div class="small text-secondary">
+          {% if r.optimiser %}Arbitrage coût jour/nuit{% else %}Créneau le plus productif{% endif %}</div>
+      </div>
+    </div>
+
+    {% if r.erreur %}
+      <div class="alert alert-warning py-2 small mb-3">
+        <i class="bi bi-exclamation-triangle me-1"></i>{{ r.erreur }}</div>
+    {% endif %}
+
+    {% if r.creneau %}
+      <p class="small mb-2">Meilleur créneau solaire :
+        <strong>{{ r.creneau.debut|date:"H:i" }} — {{ r.creneau.fin|date:"H:i" }}</strong>,
+        production prévue {{ r.creneau.production_kwh|floatformat:1 }} kWh,
+        surplus après talon maison <strong>{{ r.creneau.surplus_kwh|floatformat:1 }} kWh</strong>.</p>
+    {% endif %}
+
+    {% if r.cout_nuit is not None %}
+      <table class="table table-sm align-middle mb-0" style="max-width:680px">
+        <thead><tr><th>Comparaison des coûts</th><th class="text-end">Détail</th><th class="text-end">Coût</th></tr></thead>
+        <tbody>
+          <tr {% if r.mode == "solaire" %}class="table-active"{% endif %}>
+            <td><strong>Journée (solaire)</strong>
+              {% if r.creneau %}<br><span class="small text-secondary">à {{ r.creneau.debut|date:"H:i" }}</span>{% endif %}</td>
+            <td class="text-end small text-secondary">
+              {% if r.cout_jour is not None %}
+                besoin {{ r.besoin_kwh|floatformat:2 }} − surplus {{ r.creneau.surplus_kwh|floatformat:2 }} kWh<br>
+                = {{ r.part_reseau_kwh|floatformat:2 }} kWh réseau × {{ r.prix_hp|floatformat:4 }} € (HP {{ r.couleur }})<br>
+                <span class="text-success">{{ r.part_solaire_kwh|floatformat:2 }} kWh solaire gratuits</span>
+              {% else %}
+                pas de créneau solaire chiffrable
+              {% endif %}</td>
+            <td class="text-end">
+              {% if r.cout_jour is not None %}<strong>{{ r.cout_jour|floatformat:3 }} €</strong>{% else %}—{% endif %}</td>
+          </tr>
+          <tr {% if r.mode == "nuit" %}class="table-active"{% endif %}>
+            <td><strong>Nuit (heures creuses)</strong><br>
+              <span class="small text-secondary">à {{ r.heure_nuit }}</span></td>
+            <td class="text-end small text-secondary">
+              {{ r.besoin_kwh|floatformat:2 }} kWh × {{ r.prix_hc|floatformat:4 }} € (HC {{ r.couleur }})</td>
+            <td class="text-end"><strong>{{ r.cout_nuit|floatformat:3 }} €</strong></td>
+          </tr>
+        </tbody>
+      </table>
+      {% if r.gain is not None %}
+        <p class="small text-secondary mt-2 mb-0">Écart : <strong>{{ r.gain|floatformat:3 }} €</strong> en faveur de
+          {% if r.cout_jour <= r.cout_nuit %}la journée solaire{% else %}la nuit{% endif %}.
+          {% if not r.optimiser %}<span class="text-warning">Optimisation désactivée : la décision ignore ces coûts.</span>{% endif %}</p>
+      {% endif %}
+    {% endif %}
+
+    {% if r.detail %}
+      <details class="mt-3">
+        <summary class="text-secondary small" style="cursor:pointer">Détail du calcul</summary>
+        <ul class="small text-secondary mt-2 mb-0">
+          {% for ligne in r.detail %}<li>{{ ligne }}</li>{% endfor %}
+        </ul>
+        <p class="small text-secondary mt-2 mb-0">Ce détail est aussi écrit dans le Journal
+          à chaque recalcul automatique ou via le bouton Recalculer.</p>
+      </details>
+    {% endif %}
+  </div>
+</div>
+
+{# ---------- Variables / réglages ---------- #}
+<div class="card mb-4">
+  <div class="card-header"><i class="bi bi-braces me-2"></i>Variables du module</div>
+  <div class="card-body">
+    <p class="text-secondary small mb-3">Ces réglages sont publiés comme variables globales :
+      utilisables en condition et en action dans l'éditeur de scénarios.</p>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="params">
+      <div class="row g-3 mb-3">
+        <div class="col-6 col-md-2">
+          <label class="form-label">temp_chauffe_ete</label>
+          <input type="number" name="temp_chauffe_ete" class="form-control" min="1" value="{{ params.temp_chauffe_ete }}">
+          <div class="form-text">minutes</div>
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label">temp_chauffe_hiver</label>
+          <input type="number" name="temp_chauffe_hiver" class="form-control" min="1" value="{{ params.temp_chauffe_hiver }}">
+          <div class="form-text">minutes</div>
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label">conso_min_maison</label>
+          <input type="text" name="conso_min_maison" class="form-control" value="{{ params.conso_min_maison }}">
+          <div class="form-text">kWh/h — talon de la maison</div>
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label">conso_chauffe_eau</label>
+          <input type="text" name="conso_chauffe_eau" class="form-control" value="{{ params.conso_chauffe_eau }}">
+          <div class="form-text">kWh par cycle de chauffe</div>
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label">heure_nuit</label>
+          <input type="time" name="heure_nuit" class="form-control" value="{{ params.heure_nuit }}">
+          <div class="form-text">repli heures creuses</div>
+        </div>
+        <div class="col-6 col-md-2 d-flex align-items-center">
+          <div class="form-check mt-3">
+            <input class="form-check-input" type="checkbox" name="optimiser" id="optimiser"
+                   {% if params.optimiser %}checked{% endif %}>
+            <label class="form-check-label" for="optimiser"><strong>optimiser</strong></label>
+            <div class="form-text">arbitrage coût jour/nuit</div>
+          </div>
+        </div>
+        <div class="col-12 col-md-4">
+          <label class="form-label">ajustement</label>
+          <select name="ajustement" class="form-select">
+            {% for valeur, libelle in choix_ajustement %}
+              <option value="{{ valeur }}" {% if valeur == params.ajustement %}selected{% endif %}>
+                {{ libelle }}</option>
+            {% endfor %}
+          </select>
+          <div class="form-text">
+            Choix du créneau de chauffe. <strong>Faible</strong> : le plus tôt dès que le
+            solaire couvre le besoin. <strong>Max</strong> : au pic de production, pour
+            maximiser la part autoconsommée même si un créneau plus tôt suffirait.
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-primary">Enregistrer</button>
+    </form>
+  </div>
+</div>
+
+{# ---------- Saison ---------- #}
+<div class="card">
+  <div class="card-header"><i class="bi bi-thermometer-sun me-2"></i>Saison</div>
+  <div class="card-body">
+    <p class="text-secondary small mb-2">La durée de chauffe suit les switchs
+      <strong>Été</strong> / <strong>Hiver</strong> du tableau de bord (groupe exclusif :
+      un seul ON à la fois). Si les deux sont OFF, bascule automatique par date
+      (été du 1<sup>er</sup> mai au 15 octobre).</p>
+    <div class="d-flex gap-3">
+      {% for s in switchs_saison %}
+        <span class="badge rounded-pill {% if s.is_on %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+          {{ s.label }} : {% if s.is_on %}ON{% else %}OFF{% endif %}</span>
+      {% endfor %}
+      <span class="small text-secondary">→ saison retenue : <strong>{{ r.saison }}</strong>
+        ({{ r.duree_min }} min)</span>
+    </div>
+  </div>
+</div>
+{% endblock %}

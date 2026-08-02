@@ -1,0 +1,25 @@
+{% if non_configure %}
+  <p class="text-secondary mb-0"><i class="bi bi-exclamation-triangle me-1"></i>
+    Non configuré — renseigner l'Access ID dans l'onglet Capteurs.</p>
+{% elif erreur %}
+  <p class="text-danger small mb-0"><i class="bi bi-wifi-off me-1"></i>{{ erreur }}</p>
+{% else %}
+  {% if stale %}
+    <p class="small text-warning mb-2"><i class="bi bi-wifi-off me-1"></i>Dernière valeur connue.</p>
+  {% endif %}
+  {% for s in sensors %}
+    <div class="d-flex justify-content-between align-items-center {% if not forloop.last %}border-bottom{% endif %} py-1">
+      <span>{{ s.name }}</span>
+      <span>
+        {% if s.temperature is not None %}
+          <strong style="color:#f59e0b">{{ s.temperature|floatformat:1 }} °C</strong>
+        {% endif %}
+        {% if s.humidity is not None %}
+          <span class="text-secondary ms-2">{{ s.humidity|floatformat:0 }} %</span>
+        {% endif %}
+      </span>
+    </div>
+  {% empty %}
+    <p class="text-secondary mb-0">Aucun capteur détecté.</p>
+  {% endfor %}
+{% endif %}

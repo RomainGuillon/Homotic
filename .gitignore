@@ -1,0 +1,29 @@
+# Environnement Python
+.venv/
+__pycache__/
+*.pyc
+
+# Reglages propres a chaque machine (cles d'API, SECRET_KEY, DEBUG).
+# En production, ces variables viennent de /etc/homotic.env, hors du depot.
+.env
+
+# Base de donnees : propre a chaque machine. Le serveur porte les mesures
+# reelles, le poste de developpement des donnees de test — les versionner
+# ferait s'ecraser l'une l'autre a chaque « git pull ».
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Produit par « manage.py collectstatic », reconstruit a chaque deploiement.
+staticfiles/
+
+# Caches et jetons ecrits par les modules a l'execution
+modules/*/cache/
+*.token
+
+# Artefacts de montage reseau (SMB) et d'editeurs
+.fuse_hidden*
+.DS_Store
+*.swp
+.idea/
+.vscode/

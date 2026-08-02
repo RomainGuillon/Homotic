@@ -1,0 +1,17 @@
+{# Frise horaire 0h->24h. Contexte : frise={segments, axis, marker}, height (px). #}
+<div style="position:relative;display:flex;height:{{ height|default:62 }}px;border-radius:8px;overflow:hidden;border:1px solid #1e293b">
+  {% for s in frise.segments %}
+    <div style="flex:0 0 {{ s.width }}%;background:{{ s.bg }};color:{{ s.text }};display:flex;flex-direction:column;align-items:center;justify-content:center;border-right:1px solid #0b1220;min-width:0">
+      <div style="font-weight:800;font-size:13px;white-space:nowrap">{{ s.price_str }}</div>
+      <div style="font-size:10px;opacity:.85">{{ s.period }}</div>
+    </div>
+  {% endfor %}
+  {% if frise.marker %}
+    <div style="position:absolute;top:-3px;bottom:-3px;left:{{ frise.marker }}%;width:3px;background:#111827;box-shadow:0 0 0 1px #fff;border-radius:2px"></div>
+  {% endif %}
+</div>
+<div style="position:relative;height:16px;margin-top:4px">
+  {% for t in frise.axis %}
+    <span style="position:absolute;left:{{ t.pos }}%;transform:{{ t.transform }};font-size:11px;color:#9ca3af">{{ t.label }}</span>
+  {% endfor %}
+</div>

@@ -1,0 +1,35 @@
+{% if non_configure %}
+  <p class="text-secondary mb-0"><i class="bi bi-exclamation-triangle me-1"></i>
+    Non configuré — renseigner le compte Cozytouch dans l'onglet Chauffe-eau.</p>
+{% elif erreur %}
+  <p class="text-danger small mb-0"><i class="bi bi-wifi-off me-1"></i>{{ erreur }}</p>
+{% else %}
+  {% if stale %}
+    <p class="small text-warning mb-2"><i class="bi bi-wifi-off me-1"></i>Dernière valeur connue.</p>
+  {% endif %}
+  <div class="d-flex gap-3 align-items-center">
+    <div>{{ tank|safe }}</div>
+    <div class="flex-fill">
+      <div class="d-flex gap-4 mb-2">
+        <div>
+          <div class="fs-5 fw-bold">{{ h.showers_remaining|default:"—" }}</div>
+          <div class="small text-secondary">Douches restantes</div>
+        </div>
+        <div>
+          <div class="fs-5 fw-bold">{{ h.showers_expected|default:"—" }}</div>
+          <div class="small text-secondary">Douches souhaitées</div>
+        </div>
+      </div>
+      <div class="mb-2">
+        <div class="fs-5 fw-bold" style="color:#f59e0b">{% if h.temperature %}{{ h.temperature|floatformat:0 }} °C{% else %}—{% endif %}</div>
+        <div class="small text-secondary">Température du ballon</div>
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <span class="badge rounded-pill {% if heating_on %}text-bg-danger{% else %}text-bg-secondary{% endif %}">
+          <i class="bi bi-fire me-1"></i>{% if heating_on %}En chauffe{% else %}Pas de chauffe{% endif %}</span>
+        <span class="badge rounded-pill {% if boost_on %}text-bg-warning{% else %}text-bg-secondary{% endif %}">
+          {% if boost_on %}Boost actif{% else %}{{ h.mode|default:"Mode inconnu" }}{% endif %}</span>
+      </div>
+    </div>
+  </div>
+{% endif %}

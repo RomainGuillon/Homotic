@@ -1,0 +1,172 @@
+{% extends "core/base.html" %}
+{% block title %}Tempo — Homotic{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-1">
+  <h1 class="h4 mb-0">Tempo</h1>
+  {% if configured %}
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="refresh">
+      <button class="btn btn-sm btn-outline-light rounded-pill px-3" title="Actualiser les données RTE">
+        <i class="bi bi-arrow-clockwise me-1"></i>Actualiser
+      </button>
+    </form>
+  {% endif %}
+</div>
+<p class="text-secondary small mb-4">Frise horaire des tarifs EDF Tempo
+  {% if colors_ts %}<span class="ms-2">· données du {{ colors_ts|date:"d/m H:i" }}</span>{% endif %}</p>
+
+{% if not configured %}
+  <div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle me-2"></i>Module non configuré :
+    renseigner la clé API RTE dans le paramétrage ci-dessous.
+  </div>
+{% elif erreur %}
+  <div class="alert alert-danger">
+    <i class="bi bi-wifi-off me-2"></i>{{ erreur }}
+  </div>
+{% endif %}
+
+{% if configured %}
+  {# ---------- Aujourd'hui ---------- #}
+  <div class="card mb-4">
+    <div class="card-body">
+      <div class="d-flex align-items-center justify-content-between mb-3">
+        <span class="text-secondary small fw-semibold text-uppercase">
+          <i class="bi bi-calendar3 me-1"></i>Aujourd'hui — {{ aujourdhui.date|date:"d/m" }}</span>
+        <span class="badge rounded-pill border text-body">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ aujourdhui.frise.chip }}" class="me-1"></span>{{ aujourdhui.frise.name }}</span>
+      </div>
+      {% include "tempo/_frise.html" with frise=aujourdhui.frise height=62 %}
+    </div>
+  </div>
+
+  {# ---------- Demain ---------- #}
+  <div class="card mb-4">
+    <div class="card-body">
+      <div class="d-flex align-items-center justify-content-between mb-3">
+        <span class="text-secondary small fw-semibold text-uppercase">Demain — {{ demain.date|date:"d/m" }}</span>
+        <span class="badge rounded-pill border text-body">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ demain.frise.chip }}" class="me-1"></span>{{ demain.frise.name }}</span>
+      </div>
+      {% include "tempo/_frise.html" with frise=demain.frise height=62 %}
+      {% if not demain.frise.known %}
+        <p class="text-secondary small mb-0 mt-2"><i class="bi bi-info-circle me-1"></i>
+          La couleur de demain est publiée par RTE en général vers 11h.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ---------- Jours restants cette saison ---------- #}
+  {% if season %}
+    <div class="card mb-4">
+      <div class="card-body">
+        <p class="text-secondary small fw-semibold text-uppercase mb-3">Jours restants cette saison</p>
+        <div class="row">
+          <div class="col-4">
+            <div class="fs-3 fw-bold" style="color:#93c5fd">{{ season.remaining.BLUE }}</div>
+            <div class="small text-secondary">Bleus — {{ season.counts.BLUE }}/{{ season.quotas.BLUE }} utilisés</div>
+          </div>
+          <div class="col-4">
+            <div class="fs-3 fw-bold" style="color:#cbd5e1">{{ season.remaining.WHITE }}</div>
+            <div class="small text-secondary">Blancs — {{ season.counts.WHITE }}/{{ season.quotas.WHITE }} utilisés</div>
+            <details class="small mt-1">
+              <summary class="text-secondary" style="cursor:pointer">afficher le détail</summary>
+              <span class="text-secondary">{{ season.by_color.WHITE|join:", "|default:"aucun" }}</span>
+            </details>
+          </div>
+          <div class="col-4">
+            <div class="fs-3 fw-bold" style="color:#fca5a5">{{ season.remaining.RED }}</div>
+            <div class="small text-secondary">Rouges — {{ season.counts.RED }}/{{ season.quotas.RED }} utilisés</div>
+            <details class="small mt-1">
+              <summary class="text-secondary" style="cursor:pointer">afficher le détail</summary>
+              <span class="text-secondary">{{ season.by_color.RED|join:", "|default:"aucun" }}</span>
+            </details>
+          </div>
+        </div>
+        <p class="text-secondary small mb-0 mt-3">Saison depuis le {{ season.season_start }} ·
+          {{ season.days_counted }} jours comptés · quotas EDF : {{ season.quotas.BLUE }} bleus /
+          {{ season.quotas.WHITE }} blancs / {{ season.quotas.RED }} rouges.</p>
+      </div>
+    </div>
+  {% endif %}
+{% endif %}
+
+{# ---------- Paramétrage (bloc dépliable) ---------- #}
+<div class="accordion" id="accordionParams">
+  <div class="accordion-item">
+    <h2 class="accordion-header">
+      <button class="accordion-button {% if configured %}collapsed{% endif %}" type="button"
+              data-bs-toggle="collapse" data-bs-target="#collapseParams">
+        <i class="bi bi-gear me-2"></i>Paramétrage — API RTE &amp; tarifs
+      </button>
+    </h2>
+    <div id="collapseParams" class="accordion-collapse collapse {% if not configured %}show{% endif %}"
+         data-bs-parent="#accordionParams">
+      <div class="accordion-body">
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="params">
+
+          <h6 class="mb-3">API RTE</h6>
+          <div class="row g-3 mb-4">
+            <div class="col-12 col-md-6">
+              <label class="form-label">Clé (client ID)</label>
+              <input type="text" name="client_id" class="form-control" value="{{ params.client_id }}">
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label">Secret (client secret)</label>
+              <input type="password" name="client_secret" class="form-control"
+                     placeholder="{% if params.has_secret %}•••••• (laisser vide pour conserver){% else %}à renseigner{% endif %}">
+            </div>
+            <div class="col-12">
+              <div class="form-text">Identifiants de l'application « Tempo Like Supply Contract » sur
+                <a href="https://data.rte-france.com" target="_blank" rel="noopener">data.rte-france.com</a>.</div>
+            </div>
+          </div>
+
+          <h6 class="mb-3">Tarifs TTC (€/kWh)</h6>
+          <div class="row g-3 mb-4">
+            {% for key, label, value in params.prices %}
+              <div class="col-6 col-md-2">
+                <label class="form-label">{{ label }}</label>
+                <input type="text" name="{{ key }}" class="form-control" value="{{ value }}">
+              </div>
+            {% endfor %}
+          </div>
+
+          <h6 class="mb-3">Heures creuses &amp; actualisation</h6>
+          <div class="row g-3 mb-4">
+            <div class="col-6 col-md-2">
+              <label class="form-label">Début HC (h)</label>
+              <input type="number" name="hc_debut" class="form-control" min="0" max="23" value="{{ params.hc_debut }}">
+            </div>
+            <div class="col-6 col-md-2">
+              <label class="form-label">Fin HC (h)</label>
+              <input type="number" name="hc_fin" class="form-control" min="0" max="23" value="{{ params.hc_fin }}">
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label">Rafraîchir toutes les… (min)</label>
+              <input type="number" name="tache_actualiser_minutes" class="form-control" min="0" value="{{ params.tache_minutes }}">
+              <div class="form-text">Lecture automatique en arrière-plan, sans ouvrir l'onglet.
+                <strong>0 = jamais</strong>. Pris en compte au prochain démarrage.</div>
+            </div>
+            <div class="col-6 col-md-2">
+              <label class="form-label">Abonnement (€/mois)</label>
+              <input type="text" name="abonnement_mensuel" class="form-control" value="{{ params.abonnement_mensuel }}">
+            </div>
+            <div class="col-6 col-md-2">
+              <label class="form-label">Revente (€/kWh)</label>
+              <input type="text" name="prix_revente" class="form-control" value="{{ params.prix_revente }}">
+              <div class="form-text">Utilisés pour le coût du jour (onglet Énergie).</div>
+            </div>
+          </div>
+
+          <button class="btn btn-primary">Enregistrer</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

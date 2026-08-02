@@ -1,0 +1,8 @@
+{% if non_configure %}
+  <p class="text-secondary mb-0"><i class="bi bi-exclamation-triangle me-1"></i>
+    Non configuré — renseigner la clé API dans l'onglet Solaire.</p>
+{% elif erreur %}
+  <p class="text-danger small mb-0"><i class="bi bi-wifi-off me-1"></i>{{ erreur }}</p>
+{% else %}
+  {% include "solcast/_resume.html" %}
+{% endif %}

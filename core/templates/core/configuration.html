@@ -1,0 +1,557 @@
+{% extends "core/base.html" %}
+{% block title %}Configuration — Homotic{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h1 class="h4 mb-0">Configuration</h1>
+  <span class="text-nowrap">
+    <button type="button" class="btn btn-sm btn-outline-secondary" data-sections="ouvrir">
+      <i class="bi bi-arrows-expand me-1"></i>Tout ouvrir</button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" data-sections="replier">
+      <i class="bi bi-arrows-collapse me-1"></i>Tout replier</button>
+  </span>
+</div>
+
+<div class="accordion" id="accordionConfig">
+
+  <div class="accordion-item">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sectionControles">
+        <i class="bi bi-toggles me-2"></i>Boutons &amp; switchs
+        <span class="badge text-bg-secondary ms-2">{{ resume.controles }}</span>
+      </button>
+    </h2>
+    <div id="sectionControles" class="accordion-collapse collapse">
+      <div class="accordion-body">
+        <div class="mb-3">
+          <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#modalBouton">
+            <i class="bi bi-plus-lg me-1"></i>Créer un bouton
+          </button>
+          <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#modalSwitch">
+            <i class="bi bi-plus-lg me-1"></i>Créer un switch
+          </button>
+        </div>
+        <p class="text-secondary small mb-3">
+          L'ordre de ce tableau est celui du bloc Scénarios du tableau de bord.
+          Les contrôles d'un même groupe y sont rassemblés sous son nom, à la
+          place du premier d'entre eux.
+        </p>
+        {% if controls %}
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Type</th><th>Label</th><th>Nom</th><th>Icône</th><th>Groupe</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for c in controls %}
+                <tr>
+                  <td>
+                    {% if c.type == "SWITCH" %}
+                      <span class="badge text-bg-info">Switch</span>
+                    {% else %}
+                      <span class="badge text-bg-primary">Bouton</span>
+                    {% endif %}
+                  </td>
+                  <td>{{ c.label }}</td>
+                  <td><code>{{ c.name }}</code></td>
+                  <td>{% if c.icon %}<i class="bi bi-{{ c.icon }}"></i>{% else %}—{% endif %}</td>
+                  <td>{% if c.group %}<span class="badge text-bg-secondary">{{ c.group }}</span>{% else %}—{% endif %}</td>
+                  <td class="text-end text-nowrap">
+                    <form method="post" action="{% url 'core:control_move' c.pk %}" class="d-inline">
+                      {% csrf_token %}
+                      <input type="hidden" name="sens" value="haut">
+                      <button class="btn btn-sm btn-outline-secondary" title="Monter"
+                              {% if forloop.first %}disabled{% endif %}>
+                        <i class="bi bi-arrow-up"></i></button>
+                    </form>
+                    <form method="post" action="{% url 'core:control_move' c.pk %}" class="d-inline">
+                      {% csrf_token %}
+                      <input type="hidden" name="sens" value="bas">
+                      <button class="btn btn-sm btn-outline-secondary" title="Descendre"
+                              {% if forloop.last %}disabled{% endif %}>
+                        <i class="bi bi-arrow-down"></i></button>
+                    </form>
+                    <form method="post" action="{% url 'core:control_delete' c.pk %}" class="d-inline"
+                          onsubmit="return confirm('Supprimer « {{ c.label }} » ?');">
+                      {% csrf_token %}
+                      <button class="btn btn-sm btn-outline-danger" title="Supprimer">
+                        <i class="bi bi-trash"></i>
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="text-secondary mb-0">Aucun bouton ni switch pour le moment.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sectionModules">
+        <i class="bi bi-puzzle me-2"></i>Modules
+        <span class="badge text-bg-secondary ms-2">
+          {{ resume.modules_actifs }} actif{{ resume.modules_actifs|pluralize }}
+          / {{ resume.modules_total }}</span>
+        {% if modules_disparus %}
+          <span class="badge text-bg-warning ms-2">{{ modules_disparus|length }} absent(s) du disque</span>
+        {% endif %}
+      </button>
+    </h2>
+    <div id="sectionModules" class="accordion-collapse collapse">
+      <div class="accordion-body">
+        {% if modules_detectes %}
+          <form method="post" action="{% url 'core:modules_valider' %}">
+            {% csrf_token %}
+            {% for m in modules_detectes %}
+              <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" name="modules"
+                       value="{{ m.name }}" id="mod_{{ m.name }}"
+                       {% if m.enabled %}checked{% endif %}
+                       {% if m.erreur %}disabled{% endif %}>
+                <label class="form-check-label" for="mod_{{ m.name }}">
+                  <i class="bi bi-{{ m.icone }} me-1"></i><strong>{{ m.onglet }}</strong>
+                  <code class="ms-1">modules/{{ m.name }}</code>
+                  {% if m.erreur %}
+                    <span class="badge text-bg-danger ms-1">{{ m.erreur }}</span>
+                  {% elif m.description %}
+                    <br><span class="text-secondary small">{{ m.description }}</span>
+                  {% endif %}
+                </label>
+              </div>
+            {% endfor %}
+            <button class="btn btn-sm btn-primary mt-2">Valider</button>
+            <div class="form-text mt-2">
+              La validation redémarre le serveur (quelques secondes) pour charger ou décharger les modules.
+            </div>
+          </form>
+        {% else %}
+          <p class="text-secondary mb-0">Aucun module détecté dans <code>modules/</code>.
+            Pour en ajouter un : copier son répertoire dans <code>modules/</code> puis recharger cette page.</p>
+        {% endif %}
+
+        {% if modules_disparus %}
+          <hr>
+          <p class="small text-warning mb-0">
+            <i class="bi bi-exclamation-triangle me-1"></i>En base mais absents du disque :
+            {% for m in modules_disparus %}<code>{{ m.name }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}
+          </p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sectionVariables">
+        <i class="bi bi-braces me-2"></i>Variables globales
+        <span class="badge text-bg-secondary ms-2">{{ resume.variables }}</span>
+      </button>
+    </h2>
+    <div id="sectionVariables" class="accordion-collapse collapse">
+      <div class="accordion-body">
+        <p class="text-secondary small mb-3">Communes à tous les modules et aux scénarios
+          (testables en condition, modifiables en action).</p>
+
+        {% if variables %}
+          <table class="table table-sm align-middle mb-3" style="max-width:800px">
+            <thead><tr><th>Nom</th><th>Valeur</th><th>Description</th><th></th></tr></thead>
+            <tbody>
+              {% for v in variables %}
+                <tr>
+                  <td><code>{{ v.name }}</code></td>
+                  <td>
+                    <form method="post" action="{% url 'core:variable_save' %}" class="d-flex gap-2">
+                      {% csrf_token %}
+                      <input type="hidden" name="name" value="{{ v.name }}">
+                      <input type="text" name="value" class="form-control form-control-sm w-auto" value="{{ v.value }}">
+                      <button class="btn btn-sm btn-outline-primary" title="Mettre à jour"><i class="bi bi-check"></i></button>
+                    </form>
+                  </td>
+                  <td class="small text-secondary">{{ v.description }}</td>
+                  <td class="text-end">
+                    <form method="post" action="{% url 'core:variable_delete' v.pk %}" class="d-inline"
+                          onsubmit="return confirm('Supprimer la variable « {{ v.name }} » ?');">
+                      {% csrf_token %}
+                      <button class="btn btn-sm btn-outline-danger" title="Supprimer"><i class="bi bi-trash"></i></button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% endif %}
+
+        <form method="post" action="{% url 'core:variable_save' %}" class="row g-2 align-items-end" style="max-width:800px">
+          {% csrf_token %}
+          <div class="col-12 col-md-3">
+            <label class="form-label small">Nom</label>
+            <input type="text" name="name" class="form-control form-control-sm" placeholder="ex : saison" required>
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label small">Valeur</label>
+            <input type="text" name="value" class="form-control form-control-sm" placeholder="ex : hiver">
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label small">Description</label>
+            <input type="text" name="description" class="form-control form-control-sm" placeholder="optionnelle">
+          </div>
+          <div class="col-12 col-md-2">
+            <button class="btn btn-sm btn-primary w-100"><i class="bi bi-plus-lg me-1"></i>Créer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  {% if liaisons %}
+  <div class="accordion-item">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sectionLiaisons">
+        <i class="bi bi-diagram-3 me-2"></i>Liaisons entre modules
+        <span class="badge text-bg-secondary ms-2">{{ resume.liaisons_total }}</span>
+        {% if resume.liaisons_attention %}
+          <span class="badge text-bg-warning ms-2">
+            {{ resume.liaisons_attention }} à brancher</span>
+        {% endif %}
+      </button>
+    </h2>
+    <div id="sectionLiaisons" class="accordion-collapse collapse">
+      <div class="accordion-body">
+        <p class="small text-secondary">
+          Un module ne connaît jamais un autre module : il déclare ce dont il a
+          besoin, et vous choisissez ici qui le lui fournit.
+        </p>
+        <table class="table table-sm align-middle mb-0">
+          <thead><tr><th>Module</th><th>Besoin</th><th>Fourni par</th><th>État</th></tr></thead>
+          <tbody>
+            {% for l in liaisons %}
+              <tr>
+                <td>{{ l.module_label }}</td>
+                <td>
+                  {{ l.besoin.libelle }}
+                  {% if l.besoin.obligatoire %}<span class="text-danger">*</span>{% endif %}
+                  <div class="small text-secondary">
+                    {{ l.besoin.type }}{% if l.besoin.unite %} · {{ l.besoin.unite }}{% endif %}
+                  </div>
+                </td>
+                <td style="min-width:260px">
+                  <form method="post" action="{% url 'core:liaison_save' %}" class="d-flex">
+                    {% csrf_token %}
+                    <input type="hidden" name="module" value="{{ l.module }}">
+                    <input type="hidden" name="besoin" value="{{ l.besoin.nom }}">
+                    <select name="cible" class="form-select form-select-sm"
+                            onchange="this.form.submit()">
+                      <option value="">— non branché —</option>
+                      {% for c in l.choix %}
+                        <option value="{{ c.module }}.{{ c.nom }}"
+                                {% if l.cible == c.module|add:"."|add:c.nom %}selected{% endif %}>
+                          {{ c.module_label }} — {{ c.description|default:c.nom }}
+                        </option>
+                      {% endfor %}
+                    </select>
+                  </form>
+                  {% if not l.choix %}
+                    <div class="small text-secondary">aucun module actif ne fournit cette donnée</div>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if l.etat == 'ok' %}
+                    <span class="badge text-bg-success">branché</span>
+                  {% elif l.etat == 'manquant' %}
+                    <span class="badge text-bg-danger">requis</span>
+                    <div class="small text-secondary">{{ l.detail }}</div>
+                  {% elif l.etat == 'casse' %}
+                    <span class="badge text-bg-warning">à rebrancher</span>
+                    <div class="small text-secondary">{{ l.detail }}</div>
+                  {% else %}
+                    <span class="badge text-bg-secondary">optionnel</span>
+                    <div class="small text-secondary">sans : {{ l.detail }}</div>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="accordion-item">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sectionScheduler">
+        <i class="bi bi-clock-history me-2"></i>Scheduler
+        {% if scheduler.actif %}
+          <span class="badge text-bg-success ms-2">actif — {{ scheduler.jobs|length }} job(s)</span>
+        {% else %}
+          <span class="badge text-bg-danger ms-2">à l'arrêt</span>
+        {% endif %}
+        {% if scheduler.battement %}
+          <span class="small text-secondary ms-2">
+            dernier battement {{ scheduler.battement|date:"d/m H:i:s" }}</span>
+        {% endif %}
+      </button>
+    </h2>
+    <div id="sectionScheduler" class="accordion-collapse collapse">
+      <div class="accordion-body">
+        <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+          <label class="form-label small mb-0" for="rattrapage">
+            Rattrapage des déclencheurs à heure fixe
+          </label>
+          <form method="post" action="{% url 'core:scheduler_rattrapage' %}" class="d-flex">
+            {% csrf_token %}
+            <select name="minutes" id="rattrapage" class="form-select form-select-sm w-auto"
+                    onchange="this.form.submit()">
+              {% for m in scheduler.rattrapage_choix %}
+                <option value="{{ m }}" {% if m == scheduler.rattrapage %}selected{% endif %}>
+                  {% if m %}jusqu'à {{ m }} min de retard{% else %}aucun (à la minute près){% endif %}
+                </option>
+              {% endfor %}
+            </select>
+          </form>
+          <span class="small text-secondary">
+            Si la machine dort à l'heure prévue, le scénario est lancé au réveil
+            dans cette limite. Les tâches des modules l'appliquent au prochain
+            redémarrage.
+          </span>
+        </div>
+        {% if not scheduler.actif %}
+          <p class="text-danger mb-2">
+            Le scheduler ne tourne pas : aucune tâche périodique ni scénario horaire
+            (heure fixe, heure calculée, périodique) ne sera déclenché.
+            {% if scheduler.erreur %}<br><code>{{ scheduler.erreur }}</code>{% endif %}
+          </p>
+          <p class="small text-secondary mb-0">
+            Vérifier les dépendances (<code>pip install -r requirements.txt</code>)
+            puis redémarrer le serveur.
+          </p>
+        {% elif scheduler.jobs %}
+          <table class="table table-sm align-middle mb-0">
+            <thead><tr><th>Quoi</th><th>Type</th><th>Prochaine exécution</th></tr></thead>
+            <tbody>
+              {% for j in scheduler.jobs %}
+                <tr>
+                  <td>
+                    <strong>{{ j.nom }}</strong>
+                    <br><span class="small text-secondary">{{ j.detail }}</span>
+                  </td>
+                  <td>
+                    <span class="badge {% if j.type == 'scénario' %}text-bg-info{% else %}text-bg-secondary{% endif %}">{{ j.type }}</span>
+                    <br><code class="small text-faint">{{ j.id }}</code>
+                  </td>
+                  <td class="small">{{ j.prochaine }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="text-secondary mb-0">Scheduler actif, aucun job enregistré.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sectionScenarios">
+        <i class="bi bi-diagram-3 me-2"></i>Scénarios
+        <span class="badge text-bg-secondary ms-2">
+          {{ resume.scenarios_actifs }} actif{{ resume.scenarios_actifs|pluralize }}
+          / {{ resume.scenarios_total }}</span>
+      </button>
+    </h2>
+    <div id="sectionScenarios" class="accordion-collapse collapse">
+      <div class="accordion-body">
+        <div class="mb-3">
+          <a href="{% url 'core:scenario_new' %}" class="btn btn-sm btn-primary">
+            <i class="bi bi-plus-lg me-1"></i>Nouveau scénario</a>
+        </div>
+        {% if scenarios %}
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Nom</th><th>Déclencheur</th><th>Dernière exécution</th><th>Actif</th><th class="text-end"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for s in scenarios %}
+                <tr {% if not s.enabled %}class="opacity-50"{% endif %}>
+                  <td>
+                    <strong>{{ s.name }}</strong>
+                    {% if s.description %}<br><span class="small text-secondary">{{ s.description }}</span>{% endif %}
+                  </td>
+                  <td>{{ s.trigger_summary }}</td>
+                  <td class="small text-secondary">
+                    {% if s.last_run %}{{ s.last_run|date:"d/m H:i" }}<br>{{ s.last_status }}{% else %}—{% endif %}
+                  </td>
+                  <td>
+                    <form method="post" action="{% url 'core:scenario_toggle' s.pk %}">
+                      {% csrf_token %}
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" role="switch"
+                               {% if s.enabled %}checked{% endif %} onchange="this.form.submit()">
+                      </div>
+                    </form>
+                  </td>
+                  <td class="text-end text-nowrap">
+                    <form method="post" action="{% url 'core:scenario_run' s.pk %}" class="d-inline">
+                      {% csrf_token %}
+                      <button class="btn btn-sm btn-outline-primary" title="Tester maintenant">
+                        <i class="bi bi-play"></i></button>
+                    </form>
+                    <a href="{% url 'core:scenario_edit' s.pk %}" class="btn btn-sm btn-outline-secondary" title="Modifier">
+                      <i class="bi bi-pencil"></i></a>
+                    <form method="post" action="{% url 'core:scenario_delete' s.pk %}" class="d-inline"
+                          onsubmit="return confirm('Supprimer « {{ s.name }} » ?');">
+                      {% csrf_token %}
+                      <button class="btn btn-sm btn-outline-danger" title="Supprimer">
+                        <i class="bi bi-trash"></i></button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="text-secondary mb-0">Aucun scénario. Créer d'abord des boutons/switchs ci-dessus si besoin,
+            puis « Nouveau scénario ».</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Les sections ouvertes sont mémorisées d'une visite à l'autre : on revient
+// presque toujours sur la même partie de cette page, et tout refermer à
+// chaque rechargement (chaque formulaire renvoie ici) serait pénible.
+// Pas de data-bs-parent sur les sections : plusieurs peuvent rester ouvertes.
+(() => {
+  const CLE = 'domotic.configuration.sections';
+  const racine = document.getElementById('accordionConfig');
+  if (!racine) return;
+
+  const boutonDe = (id) => racine.querySelector(`[data-bs-target="#${id}"]`);
+
+  const restaurer = () => {
+    let ouvertes = [];
+    try { ouvertes = JSON.parse(localStorage.getItem(CLE) || '[]'); } catch (e) { /* stockage illisible */ }
+    ouvertes.forEach(id => {
+      const panneau = document.getElementById(id);
+      const bouton = boutonDe(id);
+      if (!panneau || !bouton) return;   // section supprimée depuis
+      panneau.classList.add('show');
+      bouton.classList.remove('collapsed');
+      bouton.setAttribute('aria-expanded', 'true');
+    });
+  };
+
+  const memoriser = () => {
+    const ids = [...racine.querySelectorAll('.accordion-collapse.show')].map(e => e.id);
+    try { localStorage.setItem(CLE, JSON.stringify(ids)); } catch (e) { /* mode privé */ }
+  };
+
+  restaurer();
+  racine.addEventListener('shown.bs.collapse', memoriser);
+  racine.addEventListener('hidden.bs.collapse', memoriser);
+
+  document.querySelectorAll('[data-sections]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ouvrir = btn.dataset.sections === 'ouvrir';
+      racine.querySelectorAll('.accordion-collapse').forEach(panneau => {
+        bootstrap.Collapse.getOrCreateInstance(panneau, {toggle: false})[ouvrir ? 'show' : 'hide']();
+      });
+    });
+  });
+})();
+</script>
+
+{# ---------- Popup création bouton poussoir ---------- #}
+<div class="modal fade" id="modalBouton" tabindex="-1">
+  <div class="modal-dialog">
+    <form method="post" action="{% url 'core:control_create' %}" class="modal-content">
+      {% csrf_token %}
+      <input type="hidden" name="type" value="BUTTON">
+      <div class="modal-header">
+        <h5 class="modal-title">Créer un bouton poussoir</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Nom <span class="text-danger">*</span></label>
+          <input type="text" name="name" class="form-control" required
+                 placeholder="ex : chauffe_eau_boost">
+          <div class="form-text">Identifiant technique unique, utilisé par les scénarios.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Label <span class="text-danger">*</span></label>
+          <input type="text" name="label" class="form-control" required
+                 placeholder="ex : Boost chauffe-eau">
+          <div class="form-text">Texte affiché sur le tableau de bord.</div>
+        </div>
+        <div class="mb-1">
+          <label class="form-label">Icône</label>
+          <select name="icon" class="form-select">
+            {% for value, label in button_icons %}
+              <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Abandonner</button>
+        <button type="submit" class="btn btn-primary">Ok</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# ---------- Popup création switch ---------- #}
+<div class="modal fade" id="modalSwitch" tabindex="-1">
+  <div class="modal-dialog">
+    <form method="post" action="{% url 'core:control_create' %}" class="modal-content">
+      {% csrf_token %}
+      <input type="hidden" name="type" value="SWITCH">
+      <div class="modal-header">
+        <h5 class="modal-title">Créer un switch</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Nom <span class="text-danger">*</span></label>
+          <input type="text" name="name" class="form-control" required
+                 placeholder="ex : mode_absence">
+          <div class="form-text">Identifiant technique unique, utilisé par les scénarios.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Label <span class="text-danger">*</span></label>
+          <input type="text" name="label" class="form-control" required
+                 placeholder="ex : Mode absence">
+          <div class="form-text">Texte affiché sur le tableau de bord.</div>
+        </div>
+        <div class="mb-1">
+          <label class="form-label">Groupe exclusif</label>
+          <input type="text" name="group" class="form-control" placeholder="ex : saison (optionnel)">
+          <div class="form-text">Switchs d'un même groupe : un seul peut être ON à la fois.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Abandonner</button>
+        <button type="submit" class="btn btn-primary">Ok</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

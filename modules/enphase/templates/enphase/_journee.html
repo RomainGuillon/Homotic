@@ -1,0 +1,59 @@
+{# Carte « La journée » (présentation v1). Contexte : journee, cout #}
+{% if journee %}
+  <div class="row text-center mb-2">
+    <div class="col-6">
+      <div class="fs-4 fw-bold" style="color:#f59e0b">{{ journee.production_kwh|floatformat:1 }}<span class="fs-6"> kWh</span></div>
+      <div class="small text-secondary">Produit</div>
+    </div>
+    <div class="col-6">
+      <div class="fs-4 fw-bold">{{ journee.consumption_kwh|floatformat:1 }}<span class="fs-6"> kWh</span></div>
+      <div class="small text-secondary">Consommé</div>
+    </div>
+  </div>
+
+  {% if cout %}
+    <div class="row text-center mb-3">
+      <div class="col-6">
+        <div class="fs-5 fw-bold" style="color:#e76f51">{{ cout.import_kwh|floatformat:1 }}<span class="fs-6"> kWh</span></div>
+        <div class="small text-secondary">Pris au réseau</div>
+      </div>
+      <div class="col-6">
+        <div class="fs-5 fw-bold" style="color:#4ade80">{{ cout.export_kwh|floatformat:1 }}<span class="fs-6"> kWh</span></div>
+        <div class="small text-secondary">Rejeté</div>
+      </div>
+    </div>
+
+    <div class="row g-2 mb-2">
+      <div class="col-6">
+        <div class="border rounded p-2 text-center">
+          <div class="small text-secondary">Coût EDF du jour</div>
+          <div class="fw-bold">{{ cout.edf|floatformat:2 }} €</div>
+          <div class="small text-secondary">import {{ cout.cost_import|floatformat:2 }} + abo {{ cout.subscription|floatformat:2 }}</div>
+        </div>
+      </div>
+      <div class="col-6">
+        <div class="border rounded p-2 text-center">
+          <div class="small text-secondary">Revente (à part)</div>
+          <div class="fw-bold" style="color:#4ade80">{{ cout.resale|floatformat:2 }} €</div>
+          <div class="small text-secondary">net estimé {{ cout.net|floatformat:2 }} €</div>
+        </div>
+      </div>
+    </div>
+
+    {% if cout.rows %}
+      {% for row in cout.rows %}
+        <div class="d-flex justify-content-between align-items-center border-bottom py-1 small">
+          <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:{{ row.color_hex }}" class="me-1"></span>{{ row.label }}</span>
+          <span>{{ row.kwh|floatformat:2 }} kWh · <strong>{{ row.cost|floatformat:2 }} €</strong></span>
+        </div>
+      {% endfor %}
+    {% else %}
+      <p class="small text-secondary mb-0">Prix courant appliqué : détail par tranche indisponible.</p>
+    {% endif %}
+  {% else %}
+    <p class="small text-secondary mb-0">Couleur Tempo du jour indisponible : chiffrage impossible
+      (activer et configurer le module Tempo).</p>
+  {% endif %}
+{% else %}
+  <p class="text-secondary mb-0">{{ journee_erreur|default:"Cumuls indisponibles." }}</p>
+{% endif %}

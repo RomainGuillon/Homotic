@@ -1,0 +1,93 @@
+{% comment %} Contenu de la fenêtre « À propos » (chargé à la demande). {% endcomment %}
+<div class="d-flex align-items-center gap-3 mb-3">
+  <span style="width:52px;height:52px;border-radius:var(--r-md);flex-shrink:0;
+               background:linear-gradient(140deg, var(--accent-sage), var(--accent-steel));
+               box-shadow:var(--shadow-soft);display:inline-block"></span>
+  <div>
+    <div class="h5 mb-0">{{ app_nom }} <span class="badge text-bg-secondary">{{ app_version }}</span></div>
+    <div class="small text-secondary">
+      Tableau de bord domestique modulaire : mesures en direct, scénarios
+      d'automatisation, et pilotage des consommations selon la production
+      solaire et les tarifs EDF.
+    </div>
+    {% if auteur %}
+      <div class="small mt-1">
+        <i class="bi bi-person me-1"></i>Conçu et développé par <strong>{{ auteur }}</strong>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-md-6">
+    <div class="border rounded p-3 h-100">
+      <div class="small text-secondary mb-2">État du système</div>
+      <div class="d-flex justify-content-between">
+        <span>Scheduler</span>
+        {% if scheduler.actif %}
+          <span class="badge text-bg-success">actif — {{ scheduler.jobs|length }} job(s)</span>
+        {% else %}
+          <span class="badge text-bg-danger">à l'arrêt</span>
+        {% endif %}
+      </div>
+      <div class="d-flex justify-content-between mt-1">
+        <span>Dernier battement</span>
+        <span class="small text-secondary">
+          {% if scheduler.battement %}{{ scheduler.battement|date:"d/m H:i:s" }}{% else %}—{% endif %}</span>
+      </div>
+      <div class="d-flex justify-content-between mt-1">
+        <span>Scénarios</span>
+        <span class="small text-secondary">{{ nb_scenarios_actifs }} actif{{ nb_scenarios_actifs|pluralize }}
+          / {{ nb_scenarios }}</span>
+      </div>
+      <div class="d-flex justify-content-between mt-1">
+        <span>Liaisons entre modules</span>
+        <span class="small text-secondary">{{ nb_liaisons_ok }} branchée{{ nb_liaisons_ok|pluralize }}
+          / {{ nb_liaisons }}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-md-6">
+    <div class="border rounded p-3 h-100">
+      <div class="small text-secondary mb-2">
+        Modules actifs <span class="badge text-bg-secondary">{{ modules|length }}</span></div>
+      {% if modules %}
+        <div class="d-flex flex-wrap gap-1">
+          {% for m in modules %}
+            <span class="badge text-bg-secondary">
+              <i class="bi bi-{{ m.icon }} me-1"></i>{{ m.label }}</span>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="small text-secondary mb-0">Aucun module actif — le socle fonctionne seul.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="border rounded p-3">
+      <div class="small text-secondary mb-2">Construit avec</div>
+      <span class="badge text-bg-secondary">Python {{ version_python }}</span>
+      <span class="badge text-bg-secondary">Django {{ version_django }}</span>
+      <span class="badge text-bg-secondary">APScheduler</span>
+      <span class="badge text-bg-secondary">Bootstrap 5</span>
+      <span class="badge text-bg-secondary">SQLite</span>
+      <p class="small text-secondary mb-0 mt-2">
+        Documentation dans <code>docs/</code> — voir « Créer un module » pour
+        ajouter une capacité sans toucher au socle.
+      </p>
+    </div>
+  </div>
+</div>
+
+{% if auteur %}
+  <p class="small text-secondary text-center mt-3 mb-0">
+    © {{ annees }} {{ auteur }} — tous droits réservés.
+    <br>
+    <span class="text-faint">
+      {{ app_nom }} utilise des composants libres qui restent sous leurs
+      licences respectives (Django, Bootstrap, APScheduler).
+    </span>
+  </p>
+{% endif %}

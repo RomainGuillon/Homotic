@@ -1,0 +1,642 @@
+{% extends "core/base.html" %}
+{% block title %}Éditeur de scénario — Homotic{% endblock %}
+
+{% block content %}
+{{ editor_data|json_script:"editor-data" }}
+
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <h1 class="h4 mb-0">
+    <i class="bi bi-diagram-3 me-2"></i>{% if scenario %}Modifier « {{ scenario.name }} »{% else %}Nouveau scénario{% endif %}
+  </h1>
+  <a href="{% url 'core:configuration' %}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left me-1"></i>Retour</a>
+</div>
+
+<form method="post" id="scenario-form" class="mb-5">
+  {% csrf_token %}
+  <input type="hidden" name="definition" id="definition-input">
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-12 col-md-4">
+          <label class="form-label">Nom <span class="text-danger">*</span></label>
+          <input type="text" name="name" class="form-control" required value="{{ form_name }}"
+                 placeholder="ex : Chauffe hiver nombreux">
+        </div>
+        <div class="col-12 col-md-8">
+          <label class="form-label">Description</label>
+          <input type="text" name="description" class="form-control" value="{{ form_description }}"
+                 placeholder="optionnelle">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ---------- Déclencheur ---------- #}
+  <div class="card mb-4">
+    <div class="card-header"><i class="bi bi-lightning-charge me-2"></i>Déclencheur — quand lancer ce scénario ?</div>
+    <div class="card-body">
+      <div class="row g-3 align-items-end">
+        <div class="col-12 col-md-4">
+          <select id="trigger-type" class="form-select">
+            <option value="manuel">Manuel / lancé par un autre scénario</option>
+            <option value="heure">Tous les jours à heure fixe</option>
+            <option value="heure_calculee">Tous les jours à une heure calculée</option>
+            <option value="changement">Au changement d'une valeur</option>
+            <option value="periodique">Toutes les X minutes</option>
+            <option value="bouton">Appui sur un bouton</option>
+            <option value="switch">Bascule d'un switch</option>
+          </select>
+        </div>
+        <div class="col-6 col-md-2" id="trigger-heure-box" hidden>
+          <label class="form-label small">Heure</label>
+          <input type="time" id="trigger-heure" class="form-control" value="06:30">
+        </div>
+        <div class="col-12 col-md-3" id="trigger-source-box" hidden>
+          <label class="form-label small" id="trigger-source-label">L'heure vient de</label>
+          <select id="trigger-source" class="form-select">
+            <option value="info">une info d'un module</option>
+            <option value="variable">une variable globale</option>
+          </select>
+        </div>
+        <div class="col-12 col-md-5" id="trigger-info-box" hidden>
+          <label class="form-label small" id="trigger-info-label">Info (doit renvoyer HH:MM)</label>
+          <select id="trigger-info" class="form-select"></select>
+        </div>
+        <div class="col-12 col-md-4" id="trigger-variable-box" hidden>
+          <label class="form-label small" id="trigger-variable-label">Variable (doit contenir HH:MM)</label>
+          <select id="trigger-variable" class="form-select"></select>
+        </div>
+        <div class="col-6 col-md-3" id="trigger-vers-box" hidden>
+          <label class="form-label small">Seulement si la valeur devient</label>
+          <input type="text" id="trigger-vers" class="form-control"
+                 placeholder="vide = tout changement">
+        </div>
+        <div class="col-4 col-md-2" id="trigger-verif-box" hidden>
+          <label class="form-label small">Vérifier toutes les (min)</label>
+          <input type="number" id="trigger-verif" class="form-control" min="1" value="1">
+        </div>
+        <div class="col-12" id="trigger-changement-aide" hidden>
+          <div class="form-text">La valeur est relue à chaque vérification et comparée à la
+            précédente : le scénario part quand elle change (dans un sens ou dans l'autre).
+            Laisser « devient » vide pour réagir à tout changement, ou saisir une valeur
+            précise pour ne réagir qu'au passage à celle-ci.
+            La première lecture ne déclenche rien, elle sert de référence, et une source
+            momentanément illisible est ignorée. Espacer les vérifications si l'info
+            interroge un appareil ou une API.</div>
+        </div>
+        <div class="col-12" id="trigger-calculee-aide" hidden>
+          <div class="form-text">L'heure est relue chaque minute : si elle change dans la journée,
+            le déclenchement suit. Un seul lancement par jour.
+            Exemple : info « Heure démarrage — heure_demarrage » ou variable
+            <code>heure_demarrage_chauffe_eau</code>.</div>
+        </div>
+        <div class="col-4 col-md-2" id="trigger-minutes-box" hidden>
+          <label class="form-label small">Toutes les (min)</label>
+          <input type="number" id="trigger-minutes" class="form-control" min="1" value="15">
+        </div>
+        <div class="col-4 col-md-2" id="trigger-debut-box" hidden>
+          <label class="form-label small">De (optionnel)</label>
+          <input type="time" id="trigger-debut" class="form-control">
+        </div>
+        <div class="col-4 col-md-2" id="trigger-fin-box" hidden>
+          <label class="form-label small">À (optionnel)</label>
+          <input type="time" id="trigger-fin" class="form-control">
+        </div>
+        <div class="col-12 col-md-4" id="trigger-bouton-box" hidden>
+          <label class="form-label small">Bouton</label>
+          <select id="trigger-bouton" class="form-select"></select>
+        </div>
+        <div class="col-8 col-md-4" id="trigger-switch-box" hidden>
+          <label class="form-label small">Switch</label>
+          <select id="trigger-switch" class="form-select"></select>
+        </div>
+        <div class="col-4 col-md-2" id="trigger-etat-box" hidden>
+          <label class="form-label small">Passe à</label>
+          <select id="trigger-etat" class="form-select">
+            <option value="on">ON</option>
+            <option value="off">OFF</option>
+          </select>
+        </div>
+        <div class="col-12" id="trigger-periodique-aide" hidden>
+          <div class="form-text">« Toutes les X min » + conditions = « tant que » ·
+            avec des conditions inversées (plage « hors de », variable ≠) = « jusqu'à ce que ».
+            Hors de la fenêtre De/À, le scénario ne se lance pas.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ---------- Conditions ---------- #}
+  <div class="card mb-4">
+    <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+      <span><i class="bi bi-funnel me-2"></i>Conditions — reliées par ET / OU (aucune = toujours)</span>
+      <span>
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addCondition('switch')">
+          <i class="bi bi-plus"></i> État d'un switch</button>
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addCondition('plage')">
+          <i class="bi bi-plus"></i> Plage horaire</button>
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addCondition('variable')">
+          <i class="bi bi-plus"></i> Variable</button>
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addCondition('info')">
+          <i class="bi bi-plus"></i> Info d'un module</button>
+      </span>
+    </div>
+    <div class="card-body" id="conditions-list">
+      <p class="text-secondary mb-0" id="conditions-empty">Aucune condition.</p>
+    </div>
+    <div class="card-footer small text-secondary">
+      Le <strong>ET</strong> est prioritaire sur le <strong>OU</strong> :
+      « A ET B OU C ET D » se lit « (A ET B) OU (C ET D) ».
+      Les flèches ↑ ↓ déplacent une ligne dans son bloc.
+    </div>
+  </div>
+
+  {# ---------- Actions ---------- #}
+  <div class="card mb-4">
+    <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+      <span><i class="bi bi-play-circle me-2"></i>Actions — exécutées dans l'ordre</span>
+      <span>
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addAction('fonction')">
+          <i class="bi bi-plus"></i> Fonction d'un module</button>
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addAction('switch')">
+          <i class="bi bi-plus"></i> Régler un switch</button>
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addAction('scenario')">
+          <i class="bi bi-plus"></i> Lancer un scénario</button>
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addAction('journal')">
+          <i class="bi bi-plus"></i> Message au journal</button>
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addAction('variable')">
+          <i class="bi bi-plus"></i> Définir une variable</button>
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addAction('info_var')">
+          <i class="bi bi-plus"></i> Info → variable</button>
+        <button type="button" class="btn btn-sm btn-warning" onclick="addAction('si')">
+          <i class="bi bi-plus"></i> Bloc Si / Alors / Sinon</button>
+        <button type="button" class="btn btn-sm btn-warning" onclick="addAction('boucle')">
+          <i class="bi bi-plus"></i> Boucle Tant que / Jusqu'à ce que</button>
+      </span>
+    </div>
+    <div class="card-body" id="actions-list">
+      <p class="text-secondary mb-0" id="actions-empty">Aucune action — il en faut au moins une.</p>
+    </div>
+  </div>
+
+  <button class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Enregistrer</button>
+  <a href="{% url 'core:configuration' %}" class="btn btn-outline-secondary">Abandonner</a>
+</form>
+
+<script>
+const DATA = JSON.parse(document.getElementById('editor-data').textContent);
+const MAXD = 3;  /* niveaux d'imbrication des blocs Si/Boucle */
+let uid = 0;
+
+/* ---------- helpers ---------- */
+function opt(value, label, selected) {
+  return `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`;
+}
+function controlOptions(list, selected) {
+  if (!list.length) return '<option value="">(aucun disponible)</option>';
+  return list.map(c => opt(c.name, `${c.label} (${c.name})`, selected)).join('');
+}
+function variableOptions(selected) {
+  if (!DATA.variables.length) return '<option value="">(aucune variable — en créer dans Configuration)</option>';
+  return DATA.variables.map(v => opt(v.name, `${v.name} (= ${v.value})`, selected)).join('');
+}
+function groupedOptions(list, selIdx, vide) {
+  if (!list.length) return `<option value="">${vide}</option>`;
+  const groups = {};
+  list.forEach((f, i) => { (groups[f.module_label] = groups[f.module_label] || []).push([i, f]); });
+  return Object.entries(groups).map(([label, items]) =>
+    `<optgroup label="${label}">` + items.map(([i, f]) =>
+      opt(String(i), `${f.nom}${f.description ? ' — ' + f.description : ''}`, String(selIdx))
+    ).join('') + '</optgroup>'
+  ).join('');
+}
+function findIdx(list, data) {
+  return data.module ? list.findIndex(f => f.module === data.module && f.nom === data.nom) : undefined;
+}
+function esc(s) { return (s || '').replace(/"/g, '&quot;'); }
+function makeRow(type, inner, cls) {
+  const div = document.createElement('div');
+  div.className = (cls || 'border rounded p-2 mb-2 d-flex gap-2 align-items-center flex-wrap');
+  div.dataset.type = type;
+  div.innerHTML = inner +
+    '<span class="btn-group btn-group-sm ms-auto">' +
+    '<button type="button" class="btn btn-outline-secondary" title="Monter"' +
+    ' onclick="moveRow(this, -1)"><i class="bi bi-arrow-up"></i></button>' +
+    '<button type="button" class="btn btn-outline-secondary" title="Descendre"' +
+    ' onclick="moveRow(this, 1)"><i class="bi bi-arrow-down"></i></button>' +
+    '<button type="button" class="btn btn-outline-danger" title="Supprimer"' +
+    ' onclick="removeRow(this)"><i class="bi bi-trash"></i></button>' +
+    '</span>';
+  return div;
+}
+/* Déplace une ligne parmi ses sœurs, sans sortir de son bloc : une action
+   d'un Si reste dans ce Si. */
+function moveRow(btn, sens) {
+  const row = btn.closest('[data-type]');
+  const voisin = sens < 0 ? row.previousElementSibling : row.nextElementSibling;
+  if (!voisin || !voisin.dataset.type) return;  // déjà en bout de bloc
+  if (sens < 0) voisin.before(row); else voisin.after(row);
+  refreshEmpty();
+}
+function removeRow(btn) {
+  btn.closest('[data-type]').remove();
+  refreshEmpty();
+}
+function refreshEmpty() {
+  document.getElementById('conditions-empty').hidden =
+    document.querySelectorAll('#conditions-list > [data-type]').length > 0;
+  document.getElementById('actions-empty').hidden =
+    document.querySelectorAll('#actions-list > [data-type]').length > 0;
+  refreshLiens();
+}
+/* La première condition d'un bloc n'a pas de lien : rien avant elle. */
+function refreshLiens() {
+  document.querySelectorAll('#conditions-list, [data-si="conditions"], [data-b="conditions"], [data-b="sortie"]')
+    .forEach(box => {
+      Array.from(box.children).filter(el => el.dataset.type).forEach((row, i) => {
+        const sel = row.querySelector(':scope > [data-lien]');
+        if (sel) sel.hidden = (i === 0);
+      });
+    });
+}
+
+/* ---------- déclencheur ---------- */
+function showTriggerBoxes() {
+  const t = document.getElementById('trigger-type').value;
+  const src = document.getElementById('trigger-source').value;
+  // « heure calculée » et « au changement » lisent tous deux une info ou
+  // une variable : mêmes champs, seuls les libellés changent.
+  const lit = (t === 'heure_calculee' || t === 'changement');
+  document.getElementById('trigger-heure-box').hidden = t !== 'heure';
+  document.getElementById('trigger-source-box').hidden = !lit;
+  document.getElementById('trigger-calculee-aide').hidden = t !== 'heure_calculee';
+  document.getElementById('trigger-changement-aide').hidden = t !== 'changement';
+  document.getElementById('trigger-vers-box').hidden = t !== 'changement';
+  document.getElementById('trigger-verif-box').hidden = t !== 'changement';
+  document.getElementById('trigger-info-box').hidden = !(lit && src === 'info');
+  document.getElementById('trigger-variable-box').hidden = !(lit && src === 'variable');
+  const chg = (t === 'changement');
+  document.getElementById('trigger-source-label').textContent =
+    chg ? 'La valeur vient de' : "L'heure vient de";
+  document.getElementById('trigger-info-label').textContent =
+    chg ? 'Info à surveiller' : 'Info (doit renvoyer HH:MM)';
+  document.getElementById('trigger-variable-label').textContent =
+    chg ? 'Variable à surveiller' : 'Variable (doit contenir HH:MM)';
+  document.getElementById('trigger-minutes-box').hidden = t !== 'periodique';
+  document.getElementById('trigger-debut-box').hidden = t !== 'periodique';
+  document.getElementById('trigger-fin-box').hidden = t !== 'periodique';
+  document.getElementById('trigger-periodique-aide').hidden = t !== 'periodique';
+  document.getElementById('trigger-bouton-box').hidden = t !== 'bouton';
+  document.getElementById('trigger-switch-box').hidden = t !== 'switch';
+  document.getElementById('trigger-etat-box').hidden = t !== 'switch';
+}
+document.getElementById('trigger-type').addEventListener('change', showTriggerBoxes);
+document.getElementById('trigger-source').addEventListener('change', showTriggerBoxes);
+
+/* ---------- contenus des lignes simples ---------- */
+/* Lien logique avec la condition précédente. Masqué sur la première ligne
+   de chaque bloc par refreshLiens(). Le ET est prioritaire sur le OU :
+   « A ET B OU C ET D » = « (A ET B) OU (C ET D) ». */
+function lienSelect(data) {
+  return `<select class="form-select form-select-sm w-auto text-uppercase fw-bold"
+                  data-field="lien" data-lien title="Lien avec la condition précédente">
+    ${opt('et', 'ET', data.lien || 'et')}${opt('ou', 'OU', data.lien)}</select>`;
+}
+function conditionInner(type, data = {}) {
+  return lienSelect(data) + conditionInnerBase(type, data);
+}
+function conditionInnerBase(type, data = {}) {
+  if (type === 'switch') {
+    return `<span class="badge text-bg-info">Switch</span>
+      <select class="form-select form-select-sm w-auto" data-field="controle">${controlOptions(DATA.switchs, data.controle)}</select>
+      <span class="small">est</span>
+      <select class="form-select form-select-sm w-auto" data-field="etat">
+        ${opt('on', 'ON', data.etat || 'on')}${opt('off', 'OFF', data.etat)}</select>`;
+  }
+  if (type === 'plage') {
+    return `<span class="badge text-bg-info">Plage</span>
+      <select class="form-select form-select-sm w-auto" data-field="mode">
+        ${opt('dans', 'dans la plage', data.mode || 'dans')}${opt('hors', 'hors de la plage', data.mode)}</select>
+      <input type="time" class="form-control form-control-sm w-auto" data-field="debut" value="${data.debut || '06:00'}">
+      <span class="small">→</span>
+      <input type="time" class="form-control form-control-sm w-auto" data-field="fin" value="${data.fin || '22:00'}">`;
+  }
+  if (type === 'variable') {
+    return `<span class="badge text-bg-info">Variable</span>
+      <select class="form-select form-select-sm w-auto" data-field="variable">${variableOptions(data.variable)}</select>
+      <select class="form-select form-select-sm w-auto" data-field="operateur">
+        ${['=', '!=', '<', '>', '<=', '>='].map(o => opt(o, o, data.operateur || '=')).join('')}</select>
+      <input type="text" class="form-control form-control-sm w-auto" data-field="valeur"
+             value="${esc(data.valeur)}" placeholder="valeur">`;
+  }
+  return `<span class="badge text-bg-info">Info</span>
+    <select class="form-select form-select-sm" style="max-width:420px" data-field="info_idx">
+      ${groupedOptions(DATA.infos, findIdx(DATA.infos, data), '(aucun module avec infos)')}</select>
+    <select class="form-select form-select-sm w-auto" data-field="operateur">
+      ${['=', '!=', '<', '>', '<=', '>='].map(o => opt(o, o, data.operateur || '=')).join('')}</select>
+    <input type="text" class="form-control form-control-sm w-auto" data-field="valeur"
+           value="${esc(data.valeur)}" placeholder="valeur">`;
+}
+
+function renderFnParams(sel, saved = {}) {
+  const box = sel.parentNode.querySelector('[data-params-box]');
+  if (!box) return;
+  const f = DATA.fonctions[parseInt(sel.value, 10)];
+  const defs = (f && f.params) || [];
+  box.innerHTML = defs.map(p =>
+    `<span class="small text-secondary">${p.label}</span>
+     <select class="form-select form-select-sm w-auto" data-param="${p.nom}">
+       ${p.options.map(o => opt(o[0], o[1], saved[p.nom] !== undefined ? saved[p.nom] : '')).join('')}
+     </select>`).join('');
+}
+function initFnParams(row, data) {
+  const sel = row.querySelector('[data-field="fonction_idx"]');
+  if (sel) renderFnParams(sel, data.params || {});
+}
+
+function actionInner(type, data = {}) {
+  if (type === 'fonction') {
+    return `<span class="badge text-bg-primary">Fonction</span>
+      <select class="form-select form-select-sm" style="max-width:520px" data-field="fonction_idx"
+              onchange="renderFnParams(this)">
+        ${groupedOptions(DATA.fonctions, findIdx(DATA.fonctions, data), '(aucun module avec fonctions)')}</select>
+      <span class="d-flex gap-2 align-items-center flex-wrap" data-params-box></span>`;
+  }
+  if (type === 'info_var') {
+    return `<span class="badge text-bg-primary">Info</span>
+      <select class="form-select form-select-sm" style="max-width:420px" data-field="info_idx">
+        ${groupedOptions(DATA.infos, findIdx(DATA.infos, data), '(aucun module avec infos)')}</select>
+      <span class="small">→ variable</span>
+      <select class="form-select form-select-sm w-auto" data-field="variable">${variableOptions(data.variable)}</select>`;
+  }
+  if (type === 'switch') {
+    return `<span class="badge text-bg-primary">Switch</span>
+      <select class="form-select form-select-sm w-auto" data-field="controle">${controlOptions(DATA.switchs, data.controle)}</select>
+      <span class="small">→</span>
+      <select class="form-select form-select-sm w-auto" data-field="etat">
+        ${opt('on', 'ON', data.etat || 'on')}${opt('off', 'OFF', data.etat)}</select>`;
+  }
+  if (type === 'scenario') {
+    const options = DATA.scenarios.map(n => opt(n, n, data.nom)).join('') ||
+      '<option value="">(aucun autre scénario)</option>';
+    return `<span class="badge text-bg-primary">Scénario</span>
+      <select class="form-select form-select-sm w-auto" data-field="nom">${options}</select>`;
+  }
+  if (type === 'variable') {
+    return `<span class="badge text-bg-primary">Variable</span>
+      <select class="form-select form-select-sm w-auto" data-field="variable">${variableOptions(data.variable)}</select>
+      <span class="small">=</span>
+      <input type="text" class="form-control form-control-sm w-auto" data-field="valeur"
+             value="${esc(data.valeur)}" placeholder="nouvelle valeur">`;
+  }
+  return `<span class="badge text-bg-primary">Journal</span>
+    <input type="text" class="form-control form-control-sm" style="max-width:520px"
+           data-field="message" value="${esc(data.message)}" placeholder="message à écrire dans le journal">`;
+}
+
+/* ---------- boutons des sous-listes ---------- */
+function subCondButtons(boxId) {
+  return `<span>
+    <button type="button" class="btn btn-sm btn-outline-info py-0" onclick="addSubCondition('${boxId}','switch')">+ switch</button>
+    <button type="button" class="btn btn-sm btn-outline-info py-0" onclick="addSubCondition('${boxId}','plage')">+ plage</button>
+    <button type="button" class="btn btn-sm btn-outline-info py-0" onclick="addSubCondition('${boxId}','variable')">+ variable</button>
+    <button type="button" class="btn btn-sm btn-outline-info py-0" onclick="addSubCondition('${boxId}','info')">+ info</button>
+  </span>`;
+}
+function subActionButtons(boxId, depth) {
+  let html = `<span>
+    <button type="button" class="btn btn-sm btn-outline-primary py-0" onclick="addSubAction('${boxId}','fonction',{},${depth})">+ fonction</button>
+    <button type="button" class="btn btn-sm btn-outline-primary py-0" onclick="addSubAction('${boxId}','switch',{},${depth})">+ switch</button>
+    <button type="button" class="btn btn-sm btn-outline-primary py-0" onclick="addSubAction('${boxId}','scenario',{},${depth})">+ scénario</button>
+    <button type="button" class="btn btn-sm btn-outline-primary py-0" onclick="addSubAction('${boxId}','journal',{},${depth})">+ journal</button>
+    <button type="button" class="btn btn-sm btn-outline-primary py-0" onclick="addSubAction('${boxId}','variable',{},${depth})">+ variable</button>
+    <button type="button" class="btn btn-sm btn-outline-primary py-0" onclick="addSubAction('${boxId}','info_var',{},${depth})">+ info→var</button>`;
+  if (depth < MAXD) {
+    html += `
+    <button type="button" class="btn btn-sm btn-outline-warning py-0" onclick="addSubAction('${boxId}','si',{},${depth})">+ si</button>
+    <button type="button" class="btn btn-sm btn-outline-warning py-0" onclick="addSubAction('${boxId}','boucle',{},${depth})">+ boucle</button>`;
+  }
+  return html + '</span>';
+}
+
+function addSubCondition(boxId, type, data = {}) {
+  document.getElementById(boxId).appendChild(makeRow(type, conditionInner(type, data)));
+}
+function addSubAction(boxId, type, data = {}, depth = 1) {
+  document.getElementById(boxId).appendChild(buildActionRow(type, data, depth + 1));
+}
+
+/* ---------- construction récursive des lignes d'action ---------- */
+function buildActionRow(type, data = {}, depth = 1) {
+  if (type === 'si') {
+    const id = ++uid;
+    const condBox = `si-cond-${id}`, alorsBox = `si-alors-${id}`, sinonBox = `si-sinon-${id}`;
+    const inner = `
+      <div class="w-100">
+        <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+          <span class="badge text-bg-warning">Si</span>
+          <span class="small text-secondary">les conditions ci-dessous sont vraies (liens ET / OU)</span>
+          ${subCondButtons(condBox)}
+        </div>
+        <div id="${condBox}" data-si="conditions" class="ms-4 mb-2"></div>
+        <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+          <span class="badge text-bg-success">Alors</span>
+          ${subActionButtons(alorsBox, depth)}
+        </div>
+        <div id="${alorsBox}" data-si="alors" class="ms-4 mb-2"></div>
+        <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+          <span class="badge text-bg-secondary">Sinon</span>
+          <span class="small text-secondary">(optionnel)</span>
+          ${subActionButtons(sinonBox, depth)}
+        </div>
+        <div id="${sinonBox}" data-si="sinon" class="ms-4"></div>
+      </div>`;
+    const row = makeRow('si', inner, 'border border-warning rounded p-2 mb-2 d-flex gap-2 align-items-start');
+    (data.conditions || []).forEach(c => addSubConditionTo(row, condBox, c));
+    (data.alors || []).forEach(a => addSubActionTo(row, alorsBox, a, depth));
+    (data.sinon || []).forEach(a => addSubActionTo(row, sinonBox, a, depth));
+    return row;
+  }
+
+  if (type === 'boucle') {
+    const id = ++uid;
+    const condBox = `bc-cond-${id}`, actBox = `bc-act-${id}`, sortieBox = `bc-sortie-${id}`;
+    const inner = `
+      <div class="w-100">
+        <div class="d-flex align-items-center gap-2 mb-2 flex-wrap" data-head>
+          <span class="badge text-bg-warning">Boucle</span>
+          <select class="form-select form-select-sm w-auto" data-field="mode">
+            ${opt('tantque', 'Tant que', data.mode || 'tantque')}${opt('jusqua', "Jusqu'à ce que", data.mode)}</select>
+          <span class="small">les conditions · toutes les</span>
+          <input type="number" class="form-control form-control-sm" style="width:80px" data-field="minutes"
+                 min="1" value="${data.minutes || 5}">
+          <span class="small">min · durée max</span>
+          <input type="number" class="form-control form-control-sm" style="width:90px" data-field="duree_max"
+                 min="1" value="${data.duree_max || 60}">
+          <span class="small">min</span>
+        </div>
+        <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+          <span class="small text-secondary">Conditions :</span>
+          ${subCondButtons(condBox)}
+        </div>
+        <div id="${condBox}" data-b="conditions" class="ms-4 mb-2"></div>
+        <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+          <span class="small text-secondary">Actions répétées
+            <span class="text-secondary">(aucune = simple attente)</span> :</span>
+          ${subActionButtons(actBox, depth)}
+        </div>
+        <div id="${actBox}" data-b="actions" class="ms-4 mb-2"></div>
+        <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+          <span class="badge text-bg-danger">Sortie</span>
+          <span class="small text-secondary">anticipée si toutes vraies, vérifiée après chaque itération (optionnel)</span>
+          ${subCondButtons(sortieBox)}
+        </div>
+        <div id="${sortieBox}" data-b="sortie" class="ms-4"></div>
+      </div>`;
+    const row = makeRow('boucle', inner, 'border border-warning rounded p-2 mb-2 d-flex gap-2 align-items-start');
+    (data.conditions || []).forEach(c => addSubConditionTo(row, condBox, c));
+    (data.actions || []).forEach(a => addSubActionTo(row, actBox, a, depth));
+    (data.sortie || []).forEach(c => addSubConditionTo(row, sortieBox, c));
+    return row;
+  }
+
+  const row = makeRow(type, actionInner(type, data));
+  if (type === 'fonction') initFnParams(row, data);
+  return row;
+}
+
+/* Ajouts dans un row pas encore inséré dans le DOM (initialisation) */
+function addSubConditionTo(row, boxId, data) {
+  row.querySelector(`#${boxId}`).appendChild(makeRow(data.type, conditionInner(data.type, data)));
+}
+function addSubActionTo(row, boxId, data, depth) {
+  row.querySelector(`#${boxId}`).appendChild(buildActionRow(data.type, data, depth + 1));
+}
+
+/* ---------- haut niveau ---------- */
+function addCondition(type, data = {}) {
+  document.getElementById('conditions-list').appendChild(makeRow(type, conditionInner(type, data)));
+  refreshEmpty();
+}
+function addAction(type, data = {}) {
+  document.getElementById('actions-list').appendChild(buildActionRow(type, data, 1));
+  refreshEmpty();
+}
+
+/* ---------- sérialisation ---------- */
+function resolveIdx(item, field, list) {
+  if (item[field] !== undefined) {
+    const f = list[parseInt(item[field], 10)];
+    delete item[field];
+    if (f) { item.module = f.module; item.fonction = f.fonction; item.nom = f.nom; }
+  }
+}
+function collectRow(r) {
+  const item = { type: r.dataset.type };
+  if (item.type === 'si') {
+    item.conditions = collectContainer(r.querySelector(':scope > .w-100 > [data-si="conditions"]'));
+    item.alors = collectContainer(r.querySelector(':scope > .w-100 > [data-si="alors"]'));
+    item.sinon = collectContainer(r.querySelector(':scope > .w-100 > [data-si="sinon"]'));
+    return item;
+  }
+  if (item.type === 'boucle') {
+    r.querySelectorAll(':scope > .w-100 > [data-head] [data-field]').forEach(el => {
+      item[el.dataset.field] = el.value;
+    });
+    item.conditions = collectContainer(r.querySelector(':scope > .w-100 > [data-b="conditions"]'));
+    item.actions = collectContainer(r.querySelector(':scope > .w-100 > [data-b="actions"]'));
+    item.sortie = collectContainer(r.querySelector(':scope > .w-100 > [data-b="sortie"]'));
+    return item;
+  }
+  r.querySelectorAll(':scope > [data-field]').forEach(el => { item[el.dataset.field] = el.value; });
+  resolveIdx(item, 'fonction_idx', DATA.fonctions);
+  resolveIdx(item, 'info_idx', DATA.infos);
+  const pbox = r.querySelector(':scope > [data-params-box]');
+  if (pbox) {
+    const params = {};
+    pbox.querySelectorAll('[data-param]').forEach(el => { params[el.dataset.param] = el.value; });
+    if (Object.keys(params).length) item.params = params;
+  }
+  return item;
+}
+function collectContainer(container) {
+  if (!container) return [];
+  return Array.from(container.querySelectorAll(':scope > [data-type]')).map(collectRow);
+}
+document.getElementById('scenario-form').addEventListener('submit', () => {
+  const t = document.getElementById('trigger-type').value;
+  const trigger = { type: t };
+  if (t === 'heure') trigger.heure = document.getElementById('trigger-heure').value;
+  if (t === 'heure_calculee' || t === 'changement') {
+    const src = document.getElementById('trigger-source').value;
+    trigger.source = src;
+    if (src === 'info') {
+      const f = DATA.infos[parseInt(document.getElementById('trigger-info').value, 10)];
+      if (f) { trigger.module = f.module; trigger.fonction = f.fonction; trigger.nom = f.nom; }
+    } else {
+      trigger.variable = document.getElementById('trigger-variable').value;
+    }
+  }
+  if (t === 'changement') {
+    trigger.vers = document.getElementById('trigger-vers').value.trim();
+    trigger.minutes = parseInt(document.getElementById('trigger-verif').value, 10) || 1;
+  }
+  if (t === 'periodique') {
+    trigger.minutes = parseInt(document.getElementById('trigger-minutes').value, 10) || 15;
+    trigger.debut = document.getElementById('trigger-debut').value;
+    trigger.fin = document.getElementById('trigger-fin').value;
+  }
+  if (t === 'bouton') trigger.controle = document.getElementById('trigger-bouton').value;
+  if (t === 'switch') {
+    trigger.controle = document.getElementById('trigger-switch').value;
+    trigger.etat = document.getElementById('trigger-etat').value;
+  }
+  document.getElementById('definition-input').value = JSON.stringify({
+    trigger,
+    conditions: collectContainer(document.getElementById('conditions-list')),
+    actions: collectContainer(document.getElementById('actions-list')),
+  });
+});
+
+/* ---------- initialisation ---------- */
+document.getElementById('trigger-bouton').innerHTML = controlOptions(DATA.boutons, null);
+document.getElementById('trigger-switch').innerHTML = controlOptions(DATA.switchs, null);
+document.getElementById('trigger-info').innerHTML =
+  groupedOptions(DATA.infos, undefined, '(aucun module avec infos)');
+document.getElementById('trigger-variable').innerHTML = variableOptions(null);
+
+const init = DATA.initial;
+const tt = (init.trigger || {}).type || 'manuel';
+document.getElementById('trigger-type').value = tt;
+if (tt === 'heure') document.getElementById('trigger-heure').value = init.trigger.heure || '06:30';
+if (tt === 'heure_calculee' || tt === 'changement') {
+  document.getElementById('trigger-source').value = init.trigger.source || 'info';
+  if (init.trigger.source === 'variable') {
+    document.getElementById('trigger-variable').innerHTML = variableOptions(init.trigger.variable);
+  } else {
+    document.getElementById('trigger-info').innerHTML =
+      groupedOptions(DATA.infos, findIdx(DATA.infos, init.trigger), '(aucun module avec infos)');
+  }
+}
+if (tt === 'changement') {
+  document.getElementById('trigger-vers').value = init.trigger.vers || '';
+  document.getElementById('trigger-verif').value = init.trigger.minutes || 1;
+}
+if (tt === 'periodique') {
+  document.getElementById('trigger-minutes').value = init.trigger.minutes || 15;
+  document.getElementById('trigger-debut').value = init.trigger.debut || '';
+  document.getElementById('trigger-fin').value = init.trigger.fin || '';
+}
+if (tt === 'bouton') document.getElementById('trigger-bouton').innerHTML = controlOptions(DATA.boutons, init.trigger.controle);
+if (tt === 'switch') {
+  document.getElementById('trigger-switch').innerHTML = controlOptions(DATA.switchs, init.trigger.controle);
+  document.getElementById('trigger-etat').value = init.trigger.etat || 'on';
+}
+showTriggerBoxes();
+(init.conditions || []).forEach(c => addCondition(c.type, c));
+(init.actions || []).forEach(a => addAction(a.type, a));
+refreshEmpty();
+</script>
+{% endblock %}

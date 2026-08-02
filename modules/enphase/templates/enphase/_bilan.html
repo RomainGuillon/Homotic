@@ -1,0 +1,33 @@
+{% comment %} Courbe du jour : production (bleu, haut), consommation (orange, bas),
+   réseau (gris, signé). Partagé onglet / bloc du tableau de bord. {% endcomment %}
+{% if bilan %}
+  {{ bilan.chart|safe }}
+  <p class="small text-secondary mt-1 mb-0 text-center">
+    <span style="display:inline-block;width:10px;height:8px;background:#7c9bb5;border-radius:2px"></span>
+    produit <span class="text-faint">(haut)</span>
+    · <span style="display:inline-block;width:10px;height:8px;background:#d9a65c;border-radius:2px"></span>
+    consommé <span class="text-faint">(bas)</span>
+    · <span style="display:inline-block;width:10px;height:8px;background:#8b96a5;opacity:.75;border-radius:2px"></span>
+    importé <span class="text-faint">(haut)</span> / exporté <span class="text-faint">(bas)</span>
+    {% if not compact %}
+      <br>Puissance moyenne par tranche de 15 min, à la même échelle pour les
+      trois grandeurs, sans signe sur l'axe : une barre orange vers le bas
+      reste une puissance consommée.
+      Chaque côté est un empilement : vers le haut d'où vient l'énergie
+      (production, puis ce qui est importé), vers le bas où elle va
+      (consommation, puis ce qui est exporté). Les deux hauteurs sont donc
+      égales — production + importé = consommation + exporté — et un écart
+      visible entre le haut et le bas n'est que du bruit entre les deux
+      compteurs de l'Envoy.
+      Pointe : {{ bilan.import_max|floatformat:2 }} kW importés,
+      {{ bilan.export_max|floatformat:2 }} kW exportés.
+      Mesures depuis {{ bilan.depuis|date:"H:i" }} ({{ bilan.points }} points).
+    {% endif %}
+  </p>
+{% else %}
+  <p class="text-secondary small mb-0">
+    Aucune mesure enregistrée aujourd'hui. Le diagramme se construit à partir
+    des relevés de l'Envoy (un point toutes les 5 minutes) : il apparaîtra dès
+    les premières mesures.
+  </p>
+{% endif %}

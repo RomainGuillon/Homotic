@@ -1,0 +1,271 @@
+{% extends "core/base.html" %}
+{% block title %}Solaire — Homotic{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-1">
+  <h1 class="h4 mb-0">Solaire</h1>
+  {% if configured %}
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="refresh">
+      <button class="btn btn-sm btn-outline-light rounded-pill px-3" title="Actualiser (respecte le quota Solcast)">
+        <i class="bi bi-arrow-clockwise me-1"></i>Actualiser
+      </button>
+    </form>
+  {% endif %}
+</div>
+<p class="text-secondary small mb-4">Prévisions de production Solcast</p>
+
+{% if not configured %}
+  <div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle me-2"></i>Module non configuré :
+    renseigner la clé API Solcast dans le paramétrage ci-dessous.
+  </div>
+{% elif erreur %}
+  <div class="alert alert-danger"><i class="bi bi-wifi-off me-2"></i>{{ erreur }}</div>
+{% endif %}
+
+{% if configured %}
+  {# Compteur du quota gratuit (10 appels/jour, 1 appel par site et par requête) #}
+  {% if quota %}
+    <div class="card mb-3">
+      <div class="card-body py-3">
+        <div class="row g-3 align-items-center">
+          <div class="col-6 col-md-3">
+            <div class="display-6 mb-0 {% if quota.restants == 0 %}text-danger{% elif quota.insuffisant %}text-warning{% else %}text-success{% endif %}">
+              {{ quota.restants }}
+            </div>
+            <div class="small text-secondary">
+              appel{{ quota.restants|pluralize }} restant{{ quota.restants|pluralize }} aujourd'hui
+              <br>sur {{ quota.quota }}
+              {% if quota.sature %}
+                (quota déclaré épuisé par Solcast)
+              {% else %}
+                ({{ quota.appels }} consommé{{ quota.appels|pluralize }})
+              {% endif %}
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="h4 mb-0">{{ quota.refresh_restants }}</div>
+            <div class="small text-secondary">
+              rafraîchissement{{ quota.refresh_restants|pluralize }} possible{{ quota.refresh_restants|pluralize }}
+              <br>({{ quota.cout_par_refresh }} appel{{ quota.cout_par_refresh|pluralize }} par passage : 1 par site)
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="h4 mb-0">
+              {% if quota.prochaine_heure is not None %}{{ quota.prochaine_heure }}h{% else %}—{% endif %}
+            </div>
+            <div class="small text-secondary">
+              prochain passage automatique
+              {% if quota.horaires %}<br>{% for h in quota.horaires %}{{ h }}{% if not forloop.last %} · {% endif %}{% endfor %}{% endif %}
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="h4 mb-0">{{ quota.appels_prevus }}</div>
+            <div class="small text-secondary">
+              appel{{ quota.appels_prevus|pluralize }} encore prévu{{ quota.appels_prevus|pluralize }}
+              <br>d'ici ce soir ({{ quota.heures_a_venir|length }} passage{{ quota.heures_a_venir|length|pluralize }})
+            </div>
+          </div>
+        </div>
+
+        {% if quota.suspendu_jusqua %}
+          <div class="alert alert-danger py-2 mb-0 mt-3">
+            <i class="bi bi-pause-circle me-2"></i>
+            Appels suspendus jusqu'à {{ quota.suspendu_jusqua|date:"d/m H:i" }}
+            ({{ quota.raison }}) — les courbes viennent du dernier cache.
+          </div>
+        {% elif quota.restants == 0 %}
+          <div class="alert alert-warning py-2 mb-0 mt-3">
+            <i class="bi bi-hourglass-bottom me-2"></i>
+            Quota du jour épuisé : plus aucun appel avant demain, les courbes
+            restent celles du dernier rafraîchissement.
+          </div>
+        {% elif quota.insuffisant %}
+          <div class="alert alert-warning py-2 mb-0 mt-3">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            Les {{ quota.heures_a_venir|length }} passage{{ quota.heures_a_venir|length|pluralize }} restant{{ quota.heures_a_venir|length|pluralize }}
+            demandent {{ quota.appels_prevus }} appels mais il n'en reste que
+            {{ quota.restants }} : les derniers seront refusés. Retirer une heure
+            dans le paramétrage ci-dessous.
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+
+  {# Date du dernier appel réel à l'API #}
+  {% if source.origine == "api" %}
+    <div class="alert alert-success py-2">
+      <i class="bi bi-cloud-check me-2"></i>
+      <strong>Données de l'API Solcast</strong> — dernier appel réel
+      le {{ source.quand|date:"d/m/Y à H:i" }}.
+    </div>
+  {% else %}
+    <div class="alert alert-secondary py-2">
+      <i class="bi bi-question-circle me-2"></i>
+      <strong>Aucun appel encore tracé</strong> — le prochain rafraîchissement
+      (bouton Actualiser ou passage automatique) renseignera cette ligne.
+    </div>
+  {% endif %}
+{% endif %}
+
+{% if configured and not erreur %}
+  <div class="card mb-4">
+    <div class="card-header"><i class="bi bi-sun me-2"></i>Aujourd'hui</div>
+    <div class="card-body">
+      {% include "solcast/_resume.html" %}
+    </div>
+  </div>
+
+  {# ---------- Détail par pan de toiture ---------- #}
+  {% if sites %}
+    <div class="row g-4 mb-4">
+      {% for site in sites %}
+        <div class="col-12 col-xl-6">
+          <div class="card h-100">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <span><i class="bi bi-grid-3x3 me-2"></i>{{ site.label }}</span>
+              <span class="small text-secondary text-lowercase" style="letter-spacing:0">
+                {% if site.kwh_today %}{{ site.kwh_today|floatformat:1 }} kWh aujourd'hui{% endif %}
+                {% if site.kwh_tomorrow %} · {{ site.kwh_tomorrow|floatformat:1 }} demain{% endif %}
+              </span>
+            </div>
+            <div class="card-body">
+              {{ site.chart|safe }}
+              <p class="small text-secondary mt-1 mb-0">Production prévue de ce pan de toiture aujourd'hui.</p>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="alert alert-secondary py-2 small">
+      <i class="bi bi-info-circle me-2"></i>Détail par pan de toiture indisponible :
+      le cache a été écrit avant l'ajout de cette fonction. Il apparaîtra au prochain
+      appel réel à l'API (bouton Actualiser ou rafraîchissement automatique).
+    </div>
+  {% endif %}
+
+  <div class="card mb-4">
+    <div class="card-header">Demain</div>
+    <div class="card-body">
+      {% if chart_tomorrow %}
+        {{ chart_tomorrow|safe }}
+        <p class="small text-secondary mt-1 mb-0">Prévision Solcast pour demain
+          (le créneau de chauffe est calculé pour le jour même).</p>
+      {% else %}
+        <p class="small text-secondary mb-0">
+          <i class="bi bi-hourglass-split me-2"></i>Prévision de demain non
+          disponible : le dernier rafraîchissement ne couvre pas la journée
+          entière (horizon de 48 h). Elle sera complète au passage de 03:00.
+        </p>
+      {% endif %}
+    </div>
+  </div>
+{% endif %}
+
+{# ---------- Paramétrage ---------- #}
+<div class="accordion" id="accordionParams">
+  <div class="accordion-item">
+    <h2 class="accordion-header">
+      <button class="accordion-button {% if configured %}collapsed{% endif %}" type="button"
+              data-bs-toggle="collapse" data-bs-target="#collapseParams">
+        <i class="bi bi-gear me-2"></i>Paramétrage — API Solcast
+      </button>
+    </h2>
+    <div id="collapseParams" class="accordion-collapse collapse {% if not configured %}show{% endif %}"
+         data-bs-parent="#accordionParams">
+      <div class="accordion-body">
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="params">
+          <div class="row g-3 mb-4">
+            <div class="col-12 col-md-4">
+              <label class="form-label">Clé API</label>
+              <input type="password" name="api_key" class="form-control"
+                     placeholder="{% if params.has_key %}•••••• (laisser vide pour conserver){% else %}à renseigner{% endif %}">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Resource ID(s)</label>
+              <input type="text" name="resource_ids" class="form-control" value="{{ params.resource_ids }}"
+                     placeholder="id1, id2 (séparés par des virgules)">
+              <div class="form-text">Plusieurs pans de toiture : les prévisions sont sommées.</div>
+            </div>
+            <div class="col-12 col-md-2">
+              <label class="form-label">Libellés des sites</label>
+              <input type="text" name="site_labels" class="form-control" value="{{ params.site_labels }}"
+                     placeholder="Sud, Ouest">
+            </div>
+            <div class="col-6 col-md-2">
+              <label class="form-label">Rafraîchissements automatiques</label>
+              <div id="liste-horaires" class="d-flex flex-wrap gap-2 mb-2">
+                {% for h in params.horaires %}
+                  <span class="d-flex align-items-center gap-1">
+                    <input type="time" name="horaire" value="{{ h }}"
+                           class="form-control form-control-sm" style="width:7.5rem">
+                    <button type="button" class="btn btn-sm btn-outline-danger"
+                            title="Retirer" onclick="this.parentNode.remove();majCout()">
+                      <i class="bi bi-trash"></i></button>
+                  </span>
+                {% endfor %}
+              </div>
+              <button type="button" class="btn btn-sm btn-outline-primary" onclick="ajouterHoraire()">
+                <i class="bi bi-plus-lg me-1"></i>Ajouter un rafraîchissement</button>
+              <div class="form-text" id="cout-horaires"></div>
+              <div class="form-text">
+                <strong>Aucun horaire = jamais</strong> (bouton Actualiser seulement).
+                Les affichages de page n'appellent jamais l'API.
+                Pris en compte au prochain démarrage du serveur.
+              </div>
+            </div>
+            <div class="col-12">
+              <div class="form-text">La tâche publie les variables
+                <code>solcast_prevu_aujourdhui_kwh</code> et <code>solcast_prevu_demain_kwh</code>
+                — utilisables en condition dans les scénarios.</div>
+            </div>
+          </div>
+          <button class="btn btn-primary">Enregistrer</button>
+        </form>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  /* Horaires de rafraîchissement : ajout / retrait de lignes, et rappel
+     permanent du coût en appels API (1 appel par site et par passage). */
+  const NB_SITES = {{ params.nb_sites|default:1 }};
+  const QUOTA = {{ quota.quota|default:10 }};
+
+  function ajouterHoraire(valeur) {
+    const ligne = document.createElement('span');
+    ligne.className = 'd-flex align-items-center gap-1';
+    ligne.innerHTML =
+      '<input type="time" name="horaire" class="form-control form-control-sm" style="width:7.5rem">' +
+      '<button type="button" class="btn btn-sm btn-outline-danger" title="Retirer"' +
+      ' onclick="this.parentNode.remove();majCout()"><i class="bi bi-trash"></i></button>';
+    document.getElementById('liste-horaires').appendChild(ligne);
+    const champ = ligne.querySelector('input');
+    champ.value = valeur || '12:00';
+    champ.addEventListener('change', majCout);
+    majCout();
+  }
+
+  function majCout() {
+    const n = document.querySelectorAll('#liste-horaires input[name="horaire"]').length;
+    const cout = n * NB_SITES;
+    const zone = document.getElementById('cout-horaires');
+    zone.textContent = n
+      ? `${n} rafraîchissement(s) × ${NB_SITES} site(s) = ${cout} appel(s)/jour sur un quota de ${QUOTA}.`
+      : 'Aucun rafraîchissement automatique : 0 appel par jour.';
+    zone.className = 'form-text' + (cout > QUOTA ? ' text-warning' : '');
+  }
+
+  document.querySelectorAll('#liste-horaires input[name="horaire"]')
+    .forEach(c => c.addEventListener('change', majCout));
+  majCout();
+</script>
+{% endblock %}

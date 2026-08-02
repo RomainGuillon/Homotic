@@ -1,0 +1,194 @@
+{% extends "core/base.html" %}
+{% block title %}Énergie — Homotic{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-1">
+  <h1 class="h4 mb-0">Énergie</h1>
+  {% if configured %}
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="refresh">
+      <button class="btn btn-sm btn-outline-light rounded-pill px-3" title="Relire la passerelle Envoy">
+        <i class="bi bi-arrow-clockwise me-1"></i>Actualiser
+      </button>
+    </form>
+  {% endif %}
+</div>
+<p class="text-secondary small mb-4">Flux temps réel Enphase Envoy
+  {% if ts %}<span class="ms-2">· données du {{ ts|date:"d/m H:i:s" }}</span>{% endif %}</p>
+
+{% if not configured %}
+  <div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle me-2"></i>Module non configuré :
+    renseigner le compte Enlighten et la passerelle dans le paramétrage ci-dessous.
+  </div>
+{% elif erreur and not e %}
+  <div class="alert alert-danger"><i class="bi bi-wifi-off me-2"></i>{{ erreur }}</div>
+{% elif erreur %}
+  <div class="alert alert-warning"><i class="bi bi-wifi-off me-2"></i>{{ erreur }}</div>
+{% endif %}
+
+{% if e %}
+  <div class="row g-4 mb-4">
+    <div class="col-12 col-xl-7">
+      <div class="card h-100">
+        <div class="card-header"><i class="bi bi-lightning-charge me-2"></i>Énergie maintenant</div>
+        <div class="card-body">
+          {{ flow|safe }}
+          <hr>
+          {% include "enphase/_metrics.html" %}
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-xl-5">
+      <div class="card h-100">
+        <div class="card-header"><i class="bi bi-house me-2"></i>La journée
+          {% if journee_cloud %}<span class="badge text-bg-secondary ms-2">cloud</span>{% endif %}</div>
+        <div class="card-body">
+          {% include "enphase/_journee.html" %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-header">
+      <i class="bi bi-graph-up me-2"></i>Production, consommation et réseau — aujourd'hui</div>
+    <div class="card-body">
+      {% include "enphase/_bilan.html" %}
+    </div>
+  </div>
+
+  {% if courbes %}
+    <div class="card mb-4">
+      <div class="card-header"><i class="bi bi-graph-up me-2"></i>Production et consommation du jour</div>
+      <div class="card-body">
+        <div class="small text-secondary mb-2">
+          <span style="display:inline-block;width:12px;height:12px;background:#f59e0b;border-radius:3px" class="me-1"></span>Production
+          {% if courbes.cons_total_kwh is not None %}
+            <span style="display:inline-block;width:12px;height:3px;background:#94a3b8;vertical-align:middle" class="ms-3 me-1"></span>Consommation
+          {% endif %}
+        </div>
+        {{ courbes.chart|safe }}
+        <div class="row g-2 mt-1">
+          <div class="col-6">
+            <div class="border rounded p-2 text-center">
+              <div class="small text-secondary">Produit depuis minuit</div>
+              <div class="fw-bold" style="color:#f59e0b">{{ courbes.prod_total_kwh|floatformat:1 }} kWh</div>
+            </div>
+          </div>
+          <div class="col-6">
+            <div class="border rounded p-2 text-center">
+              <div class="small text-secondary">Consommé depuis minuit</div>
+              {% if courbes.cons_total_kwh is not None %}
+                <div class="fw-bold">{{ courbes.cons_total_kwh|floatformat:1 }} kWh</div>
+              {% else %}
+                <div class="fw-bold text-secondary">—</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+{% endif %}
+
+{# ---------- Paramétrage ---------- #}
+<div class="accordion" id="accordionParams">
+  <div class="accordion-item">
+    <h2 class="accordion-header">
+      <button class="accordion-button {% if configured %}collapsed{% endif %}" type="button"
+              data-bs-toggle="collapse" data-bs-target="#collapseParams">
+        <i class="bi bi-gear me-2"></i>Paramétrage — Enphase Enlighten &amp; Envoy
+      </button>
+    </h2>
+    <div id="collapseParams" class="accordion-collapse collapse {% if not configured %}show{% endif %}"
+         data-bs-parent="#accordionParams">
+      <div class="accordion-body">
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="params">
+          <div class="row g-3 mb-4">
+            <div class="col-12 col-md-4">
+              <label class="form-label">Email Enlighten</label>
+              <input type="text" name="username" class="form-control" value="{{ params.username }}">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Mot de passe</label>
+              <input type="password" name="password" class="form-control"
+                     placeholder="{% if params.has_password %}•••••• (laisser vide pour conserver){% else %}à renseigner{% endif %}">
+            </div>
+            <div class="col-6 col-md-2">
+              <label class="form-label">N° série Envoy</label>
+              <input type="text" name="envoy_serial" class="form-control" value="{{ params.envoy_serial }}">
+            </div>
+            <div class="col-6 col-md-2">
+              <label class="form-label">Adresse Envoy</label>
+              <input type="text" name="envoy_host" class="form-control" value="{{ params.envoy_host }}"
+                     placeholder="ex : 192.168.1.50">
+            </div>
+            <div class="col-6 col-md-2">
+              <label class="form-label">Rafraîchir toutes les… (min)</label>
+              <input type="number" name="tache_actualiser_minutes" class="form-control" min="0" value="{{ params.tache_minutes }}">
+              <div class="form-text">Lecture automatique en arrière-plan, sans ouvrir l'onglet.
+                <strong>0 = jamais</strong>. Pris en compte au prochain démarrage.</div>
+            </div>
+            <div class="col-12">
+              <div class="form-text">La tâche publie les variables
+                <code>enphase_production_w</code>, <code>enphase_conso_w</code>,
+                <code>enphase_import_w</code>, <code>enphase_export_w</code> —
+                utilisables en condition dans les scénarios.</div>
+            </div>
+          </div>
+          <button class="btn btn-primary">Enregistrer</button>
+        </form>
+
+        <hr class="my-4">
+
+        <h6 class="mb-2">Cloud Enlighten (API v4) — cumuls du jour &amp; courbes 15 min
+          {% if cloud_params.linked %}<span class="badge text-bg-success ms-2">lié</span>{% endif %}</h6>
+        <form method="post" class="mb-3">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="cloud_params">
+          <div class="row g-3 mb-3">
+            <div class="col-12 col-md-3">
+              <label class="form-label">API key</label>
+              <input type="text" name="cloud_api_key" class="form-control" value="{{ cloud_params.api_key }}">
+            </div>
+            <div class="col-12 col-md-3">
+              <label class="form-label">Client ID</label>
+              <input type="text" name="cloud_client_id" class="form-control" value="{{ cloud_params.client_id }}">
+            </div>
+            <div class="col-12 col-md-3">
+              <label class="form-label">Client secret</label>
+              <input type="password" name="cloud_client_secret" class="form-control"
+                     placeholder="{% if cloud_params.has_secret %}•••••• (laisser vide pour conserver){% else %}à renseigner{% endif %}">
+            </div>
+            <div class="col-12 col-md-3">
+              <label class="form-label">System ID</label>
+              <input type="text" name="cloud_system_id" class="form-control" value="{{ cloud_params.system_id }}"
+                     placeholder="auto-détecté à la liaison">
+            </div>
+          </div>
+          <button class="btn btn-outline-primary btn-sm">Enregistrer les paramètres cloud</button>
+        </form>
+
+        {% if not cloud_params.linked %}
+          {% if cloud_params.auth_url %}
+            <p class="small mb-2">1. <a href="{{ cloud_params.auth_url }}" target="_blank" rel="noopener">
+              Ouvrir la page d'autorisation Enphase</a>, se connecter, autoriser, puis copier le code affiché.</p>
+            <form method="post" class="d-flex gap-2" style="max-width:480px">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="cloud_link">
+              <input type="text" name="code" class="form-control form-control-sm" placeholder="2. coller le code d'autorisation">
+              <button class="btn btn-sm btn-primary">Lier</button>
+            </form>
+          {% else %}
+            <p class="small text-secondary mb-0">Renseigner API key, client ID et secret pour lancer la liaison OAuth.</p>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

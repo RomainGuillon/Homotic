@@ -1,0 +1,102 @@
+{% extends "core/base.html" %}
+{% block title %}Journal — Homotic{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h1 class="h4 mb-0">Journal</h1>
+
+  <form method="get" class="d-flex gap-2">
+    <select name="module" class="form-select form-select-sm" style="width:auto">
+      <option value="">Tous les modules</option>
+      {% for m in modules %}
+        <option value="{{ m }}" {% if m == current_module %}selected{% endif %}>{{ m }}</option>
+      {% endfor %}
+    </select>
+    <select name="level" class="form-select form-select-sm" style="width:auto">
+      <option value="">Tous les niveaux</option>
+      {% for value, label in levels %}
+        <option value="{{ value }}" {% if value == current_level %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-sm btn-primary">Filtrer</button>
+    {% if current_module or current_level %}
+      <a href="{% url 'core:journal' %}" class="btn btn-sm btn-outline-secondary">Effacer</a>
+    {% endif %}
+  </form>
+</div>
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3 small text-secondary">
+  <span>
+    {{ total }} entrée{{ total|pluralize }} au total
+    {% if retention %}
+      — purge automatique chaque nuit au-delà de {{ retention }} jours
+    {% else %}
+      — <span class="text-warning">purge désactivée</span>
+    {% endif %}
+  </span>
+
+  <form method="post" action="{% url 'core:journal_retention' %}" class="d-flex align-items-center gap-2">
+    {% csrf_token %}
+    <label class="mb-0" for="retention">Conserver</label>
+    <select name="jours" id="retention" class="form-select form-select-sm w-auto"
+            onchange="this.form.submit()">
+      {% for j in retention_choix %}
+        <option value="{{ j }}" {% if j == retention %}selected{% endif %}>
+          {% if j %}{{ j }} jours{% else %}sans limite{% endif %}
+        </option>
+      {% endfor %}
+    </select>
+    <noscript><button class="btn btn-sm btn-outline-secondary">Appliquer</button></noscript>
+  </form>
+</div>
+
+{% if page.object_list %}
+  <table class="table table-sm table-hover align-middle">
+    <thead>
+      <tr>
+        <th style="width:160px">Date</th>
+        <th style="width:140px">Module</th>
+        <th style="width:130px">Niveau</th>
+        <th>Message</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in page.object_list %}
+        <tr>
+          <td class="text-secondary">{{ log.created_at|date:"d/m/Y H:i:s" }}</td>
+          <td><span class="badge text-bg-secondary">{{ log.module }}</span></td>
+          <td>
+            {% if log.level == "ERROR" %}
+              <span class="badge text-bg-danger">Erreur</span>
+            {% elif log.level == "WARNING" %}
+              <span class="badge text-bg-warning">Avertissement</span>
+            {% else %}
+              <span class="badge text-bg-info">Info</span>
+            {% endif %}
+          </td>
+          <td>{{ log.message }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if page.has_other_pages %}
+    <nav class="d-flex justify-content-center">
+      <ul class="pagination pagination-sm">
+        {% if page.has_previous %}
+          <li class="page-item"><a class="page-link" href="?page={{ page.previous_page_number }}&module={{ current_module }}&level={{ current_level }}">&laquo;</a></li>
+        {% endif %}
+        <li class="page-item disabled"><span class="page-link">Page {{ page.number }} / {{ page.paginator.num_pages }}</span></li>
+        {% if page.has_next %}
+          <li class="page-item"><a class="page-link" href="?page={{ page.next_page_number }}&module={{ current_module }}&level={{ current_level }}">&raquo;</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  {% endif %}
+{% else %}
+  <div class="text-center text-secondary py-5">
+    <i class="bi bi-journal-text display-4 d-block mb-3"></i>
+    <p>Aucune entrée dans le journal{% if current_module or current_level %} avec ces filtres{% endif %}.</p>
+  </div>
+{% endif %}
+{% endblock %}

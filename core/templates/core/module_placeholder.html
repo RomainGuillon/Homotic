@@ -1,0 +1,24 @@
+{% extends "core/base.html" %}
+{% block title %}{{ module.label }} — Homotic{% endblock %}
+
+{% block content %}
+<h1 class="h4 mb-4"><i class="bi bi-{{ module.icon }} me-2"></i>{{ module.label }}</h1>
+
+{% if erreur %}
+  <div class="alert alert-danger">
+    <p class="mb-1"><i class="bi bi-exclamation-triangle me-2"></i>
+      Cet onglet n'a pas pu s'afficher.</p>
+    <code class="small">{{ erreur }}</code>
+    <p class="small mb-0 mt-2 text-secondary">
+      Le reste de l'application continue de fonctionner. Le détail est dans le
+      Journal, sous le module « {{ module.name }} ».
+    </p>
+  </div>
+{% else %}
+  <div class="text-center text-secondary py-5">
+    <i class="bi bi-cone-striped display-4 d-block mb-3"></i>
+    <p class="mb-1">Ce module n'a pas encore d'onglet.</p>
+    <p class="small">Le module doit fournir <code>modules/{{ module.name }}/onglet/views.py</code> avec une fonction <code>onglet(request)</code>.</p>
+  </div>
+{% endif %}
+{% endblock %}

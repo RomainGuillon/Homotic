@@ -1,0 +1,430 @@
+/* Thème Domotic v2 — reprise de l'identité de la v1 (web/static/web/css/theme.css) :
+   ardoise profonde, formes très arrondies, accents désaturés, halos diffus.
+   Appliqué par-dessus Bootstrap : on redéfinit les variables Bootstrap avec la
+   palette v1, puis on ajuste quelques composants. */
+
+:root {
+  /* --- Palette v1 --- */
+  --bg: #1b2027;
+  --bg-deep: #161a20;
+  --surface: #242b34;
+  --surface-raised: #2b333e;
+  --surface-sunken: #1f252d;
+
+  --text: #e4e7eb;
+  --text-muted: #98a2b0;
+  --text-faint: #6b7684;
+
+  --accent-sage: #7fa88b;
+  --accent-amber: #d9a65c;
+  --accent-terracotta: #c97b63;
+  --accent-steel: #7c9bb5;
+  --accent-lilac: #9b8fb0;
+
+  --border: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.11);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  --shadow-soft: 0 4px 14px rgba(0, 0, 0, 0.18);
+
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-xl: 28px;
+
+  --font: "Segoe UI", Inter, system-ui, -apple-system, "Helvetica Neue", sans-serif;
+
+  /* --- Correspondance Bootstrap --- */
+  --bs-body-bg: var(--bg);
+  --bs-body-color: var(--text);
+  --bs-body-font-family: var(--font);
+  --bs-body-font-size: 0.95rem;
+  --bs-secondary-color: var(--text-muted);
+  --bs-emphasis-color: var(--text);
+  --bs-border-color: var(--border);
+  --bs-border-color-translucent: var(--border);
+  --bs-primary: var(--accent-sage);
+  --bs-primary-rgb: 127, 168, 139;
+  --bs-secondary: var(--text-faint);
+  --bs-success: var(--accent-sage);
+  --bs-success-rgb: 127, 168, 139;
+  --bs-warning: var(--accent-amber);
+  --bs-warning-rgb: 217, 166, 92;
+  --bs-danger: var(--accent-terracotta);
+  --bs-danger-rgb: 201, 123, 99;
+  --bs-info: var(--accent-steel);
+  --bs-info-rgb: 124, 155, 181;
+  --bs-link-color: var(--accent-steel);
+  --bs-link-hover-color: var(--accent-sage);
+  --bs-border-radius: var(--r-md);
+  --bs-border-radius-sm: var(--r-sm);
+  --bs-border-radius-lg: var(--r-lg);
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Halos colorés très diffus (repris de la v1) */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(60rem 40rem at 12% -10%, rgba(127, 168, 139, 0.10), transparent 60%),
+    radial-gradient(50rem 36rem at 96% 4%, rgba(217, 166, 92, 0.08), transparent 60%),
+    radial-gradient(46rem 34rem at 60% 110%, rgba(124, 155, 181, 0.07), transparent 60%);
+  pointer-events: none;
+}
+
+/* ---------------- Barre de navigation ---------------- */
+
+.navbar {
+  background: linear-gradient(180deg, rgba(36, 43, 52, 0.75), rgba(27, 32, 39, 0.35)) !important;
+  border-bottom: 1px solid var(--border) !important;
+  backdrop-filter: blur(6px);
+}
+
+.navbar-brand {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text) !important;
+}
+
+.nav-pills .nav-link {
+  color: var(--text-muted);
+  border-radius: var(--r-md);
+  padding: 8px 14px;
+  font-size: 0.9rem;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.nav-pills .nav-link:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+
+.nav-pills .nav-link.active {
+  background: rgba(127, 168, 139, 0.16) !important;
+  color: var(--text) !important;
+  font-weight: 500;
+}
+
+.nav-pills .nav-link.active i { color: var(--accent-sage); }
+
+/* ---------------- Cartes ---------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Lueur discrète en haut de carte (v1) */
+.card::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.09), transparent);
+  pointer-events: none;
+}
+
+.card-header {
+  background: transparent;
+  border-bottom: none;
+  padding: 18px 22px 4px;
+  font-size: 0.83rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.card-body { padding: 14px 22px 20px; }
+
+/* ---------------- Boutons ---------------- */
+
+.btn {
+  border-radius: var(--r-md);
+  font-size: 0.88rem;
+  padding: 8px 16px;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+.btn:active { transform: translateY(1px); }
+
+.btn-primary, .btn-success {
+  background: rgba(127, 168, 139, 0.18);
+  border-color: rgba(127, 168, 139, 0.45);
+  color: var(--text);
+}
+
+.btn-primary:hover, .btn-success:hover {
+  background: rgba(127, 168, 139, 0.28);
+  border-color: var(--accent-sage);
+  color: var(--text);
+}
+
+.btn-danger {
+  background: rgba(201, 123, 99, 0.18);
+  border-color: rgba(201, 123, 99, 0.45);
+  color: var(--text);
+}
+
+.btn-danger:hover {
+  background: rgba(201, 123, 99, 0.3);
+  border-color: var(--accent-terracotta);
+  color: var(--text);
+}
+
+.btn-outline-secondary, .btn-outline-light {
+  border-color: var(--border-strong);
+  color: var(--text-muted);
+}
+
+.btn-outline-secondary:hover, .btn-outline-light:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.btn-outline-primary { border-color: rgba(127, 168, 139, 0.45); color: var(--accent-sage); }
+.btn-outline-primary:hover { background: rgba(127, 168, 139, 0.18); color: var(--text); }
+.btn-outline-danger { border-color: rgba(201, 123, 99, 0.4); color: var(--accent-terracotta); }
+.btn-outline-danger:hover { background: rgba(201, 123, 99, 0.18); color: var(--text); }
+.btn-outline-warning { border-color: rgba(217, 166, 92, 0.45); color: var(--accent-amber); }
+.btn-outline-warning:hover { background: rgba(217, 166, 92, 0.18); color: var(--text); }
+.btn-outline-info { border-color: rgba(124, 155, 181, 0.45); color: var(--accent-steel); }
+.btn-outline-info:hover { background: rgba(124, 155, 181, 0.18); color: var(--text); }
+.btn-warning { background: rgba(217, 166, 92, 0.2); border-color: rgba(217, 166, 92, 0.5); color: var(--text); }
+.btn-warning:hover { background: rgba(217, 166, 92, 0.3); color: var(--text); }
+
+/* ---------------- Pastilles / badges ---------------- */
+
+.badge {
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+  padding: 5px 11px;
+}
+
+.text-bg-primary, .text-bg-success {
+  background: rgba(127, 168, 139, 0.18) !important;
+  color: var(--accent-sage) !important;
+  border: 1px solid rgba(127, 168, 139, 0.35);
+}
+
+.text-bg-secondary {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: var(--text-muted) !important;
+  border: 1px solid var(--border-strong);
+}
+
+.text-bg-warning {
+  background: rgba(217, 166, 92, 0.18) !important;
+  color: var(--accent-amber) !important;
+  border: 1px solid rgba(217, 166, 92, 0.35);
+}
+
+.text-bg-danger {
+  background: rgba(201, 123, 99, 0.18) !important;
+  color: var(--accent-terracotta) !important;
+  border: 1px solid rgba(201, 123, 99, 0.35);
+}
+
+.text-bg-info {
+  background: rgba(124, 155, 181, 0.18) !important;
+  color: var(--accent-steel) !important;
+  border: 1px solid rgba(124, 155, 181, 0.35);
+}
+
+/* ---------------- Champs ---------------- */
+
+.form-control, .form-select {
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  color: var(--text);
+}
+
+.form-control:focus, .form-select:focus {
+  background: var(--surface-sunken);
+  border-color: rgba(127, 168, 139, 0.6);
+  box-shadow: 0 0 0 3px rgba(127, 168, 139, 0.15);
+  color: var(--text);
+}
+
+.form-control::placeholder { color: var(--text-faint); }
+.form-label { font-size: 0.82rem; color: var(--text-muted); }
+.form-text { color: var(--text-faint); font-size: 0.76rem; }
+
+.form-check-input {
+  background-color: var(--surface-sunken);
+  border-color: var(--border-strong);
+}
+
+.form-check-input:checked {
+  background-color: var(--accent-sage);
+  border-color: var(--accent-sage);
+}
+
+/* ---------------- Tableaux ---------------- */
+
+.table {
+  --bs-table-bg: transparent;
+  --bs-table-color: var(--text);
+  --bs-table-border-color: var(--border);
+  --bs-table-hover-bg: rgba(255, 255, 255, 0.03);
+  --bs-table-hover-color: var(--text);
+  --bs-table-active-bg: rgba(127, 168, 139, 0.12);
+  --bs-table-active-color: var(--text);
+}
+
+.table > thead th {
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  border-bottom-color: var(--border);
+}
+
+/* ---------------- Divers ---------------- */
+
+.alert { border-radius: var(--r-lg); border-width: 1px; }
+.alert-warning { background: rgba(217, 166, 92, 0.12); border-color: rgba(217, 166, 92, 0.3); color: var(--text); }
+.alert-danger { background: rgba(201, 123, 99, 0.12); border-color: rgba(201, 123, 99, 0.3); color: var(--text); }
+.alert-success { background: rgba(127, 168, 139, 0.12); border-color: rgba(127, 168, 139, 0.3); color: var(--text); }
+.alert-info { background: rgba(124, 155, 181, 0.12); border-color: rgba(124, 155, 181, 0.3); color: var(--text); }
+
+.accordion { --bs-accordion-bg: transparent; --bs-accordion-border-color: var(--border); }
+/* Sections détachées les unes des autres : Bootstrap les colle en un bloc
+   unique (bordures partagées, coins arrondis seulement en haut et en bas).
+   Ici chaque section est une carte à part entière — on repère d'un coup
+   d'œil où l'une finit et où la suivante commence. */
+.accordion-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg) !important;
+  overflow: hidden;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow-soft);
+}
+.accordion-item:last-child { margin-bottom: 0; }
+.accordion-button {
+  background: transparent;
+  color: var(--text);
+  font-size: 0.9rem;
+  box-shadow: none !important;
+  padding: 14px 22px;
+}
+.accordion-button:not(.collapsed) {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  /* Trait de séparation entre l'en-tête et le contenu ouvert */
+  border-bottom: 1px solid var(--border);
+}
+.accordion-button::after { filter: invert(0.7); }
+.accordion-body { padding: 18px 22px 20px; }
+
+.progress { background: var(--surface-sunken); border-radius: 999px; }
+.border { border-color: var(--border) !important; border-radius: var(--r-md); }
+.text-secondary { color: var(--text-muted) !important; }
+hr { border-color: var(--border); opacity: 1; }
+code { color: var(--accent-amber); }
+h1, h2, h3, h4, h5 { letter-spacing: -0.01em; font-weight: 600; }
+details summary { color: var(--text-muted); }
+::selection { background: rgba(127, 168, 139, 0.3); }
+
+/* ---------------- Organisation du tableau de bord ---------------- */
+
+.bloc-organisable { cursor: grab; }
+.bloc-organisable.drag-en-cours { opacity: 0.45; }
+.bloc-organisable.cible-drop > .card { outline: 2px dashed var(--accent-sage); outline-offset: 3px; }
+.poignee { color: var(--text-faint); cursor: grab; }
+.poignee:hover { color: var(--text); }
+
+/* ---------------- Contrôles du bloc Scénarios ----------------
+   Style porté par une classe dédiée plutôt que par les utilitaires
+   Bootstrap : le thème redéfinit « .border » avec !important, ce qui rend
+   l'apparence dépendante de l'ordre des feuilles de style. Ici, tous les
+   switchs sont rigoureusement identiques. */
+
+.controle { margin: 0; }
+
+/* Cadre d'un switch. Règle volontairement seule dans sa déclaration : un
+   sélecteur invalide dans une liste séparée par des virgules annule TOUTE
+   la règle, y compris les sélecteurs valides. La variante structurelle
+   ci-dessous, qui utilise « :has() », est donc déclarée à part. */
+.controle-switch {
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  padding: 0.45rem 0.9rem;
+  margin: 0;
+  transition: border-color 0.18s ease;
+}
+
+/* Filet de sécurité : même cadre pour tout formulaire contenant un switch,
+   même s'il a perdu sa classe. Ignoré par les navigateurs sans « :has() ». */
+.controles-rangee form:has(.form-check.form-switch) {
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  padding: 0.45rem 0.9rem;
+  margin: 0;
+}
+
+.controle-switch:hover { border-color: rgba(127, 168, 139, 0.45); }
+.controle-switch .form-check-label { cursor: pointer; white-space: nowrap; }
+
+/* Rangée de contrôles : tous les cadres ont la même hauteur, et les
+   contrôles sont centrés dedans — un groupe et un contrôle isolé restent
+   donc alignés sur la même ligne. */
+.controles-rangee {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  /* Les contrôles isolés sont des enfants directs de la rangée : les
+     centrer verticalement suffit à les aligner avec ceux des groupes,
+     sans conteneur intermédiaire. */
+  align-items: center;
+}
+
+/* Un groupe : cadre arrondi, nom centré posé sur le trait du haut. */
+.groupe-controles {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  padding: 0.75rem 0.9rem 0.55rem;
+}
+
+/* Le cadre d'un groupe descend un peu pour laisser sa place au nom posé
+   sur le trait du haut, sans décaler les contrôles isolés. */
+.groupe-controles { margin-top: 0.35rem; }
+
+.groupe-titre {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 0 0.5rem;
+  background: var(--surface);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}

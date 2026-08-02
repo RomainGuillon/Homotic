@@ -1,0 +1,44 @@
+{% if non_configure %}
+  <p class="text-secondary mb-0"><i class="bi bi-exclamation-triangle me-1"></i>
+    Non configuré — renseigner la clé API dans l'onglet Tempo.</p>
+{% else %}
+  {% if erreur %}
+    <p class="small text-warning mb-2"><i class="bi bi-wifi-off me-1"></i>{{ erreur }}</p>
+  {% endif %}
+
+  <div class="d-flex align-items-start justify-content-between mb-2">
+    <div>
+      <div class="fs-3 fw-bold lh-1" style="color:{{ current_chip }}">{{ current_name }}</div>
+      <div class="text-secondary small">Aujourd'hui — {{ period_label }}</div>
+    </div>
+    <div class="text-end">
+      {% if prix_str %}
+        <div class="fw-bold"><span class="fs-5">{{ prix_str }}</span> <span class="small">EUR/kWh</span></div>
+        <div class="text-secondary small">Prix en cours</div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% include "tempo/_frise.html" with frise=frise height=48 %}
+
+  <div class="row g-3 mt-1">
+    <div class="col-6">
+      <div class="border rounded p-2 h-100">
+        <div class="text-secondary small">Demain</div>
+        <div class="fs-5 fw-bold" style="color:{{ demain_chip }}">{{ demain_name }}</div>
+      </div>
+    </div>
+    <div class="col-6">
+      <div class="border rounded p-2 h-100">
+        <div class="text-secondary small mb-1">Restant cette saison</div>
+        {% if season %}
+          <div class="d-flex justify-content-between small"><span>Rouge</span><strong>{{ season.remaining.RED }}</strong></div>
+          <div class="d-flex justify-content-between small"><span>Blanc</span><strong>{{ season.remaining.WHITE }}</strong></div>
+          <div class="d-flex justify-content-between small"><span>Bleu</span><strong>{{ season.remaining.BLUE }}</strong></div>
+        {% else %}
+          <div class="small text-secondary">—</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% endif %}

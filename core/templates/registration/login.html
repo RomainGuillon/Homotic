@@ -1,0 +1,76 @@
+{% load static %}<!doctype html>
+{% comment %} Page autonome : elle n'etend pas « core/base.html », dont la
+   barre de navigation pointe vers des pages protegees. Un visiteur non
+   connecte n'a rien a voir d'autre que ce formulaire. {% endcomment %}
+<html lang="fr" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connexion — {{ app_nom|default:"Homotic" }}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="{% static 'core/theme.css' %}?v={{ version_theme }}" rel="stylesheet">
+  <style>
+    body { min-height: 100vh; display: grid; place-items: center; padding: 1.5rem; }
+    .carte-login { width: 100%; max-width: 22rem; }
+    .logo-login {
+      width: 44px; height: 44px; border-radius: var(--r-md);
+      background: linear-gradient(140deg, var(--accent-sage), var(--accent-steel));
+      box-shadow: var(--shadow-soft);
+    }
+  </style>
+</head>
+<body>
+  <div class="carte-login">
+    <div class="d-flex align-items-center gap-3 mb-4">
+      <span class="logo-login d-inline-block"></span>
+      <div>
+        <div class="h5 mb-0">{{ app_nom|default:"Homotic" }}</div>
+        <div class="small text-secondary">Tableau de bord domestique</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body">
+        {% if form.errors %}
+          {% comment %} Message volontairement vague : preciser si c'est
+             l'identifiant ou le mot de passe qui est faux permettrait de
+             deviner les comptes existants. {% endcomment %}
+          <div class="alert alert-danger py-2 small mb-3">
+            <i class="bi bi-exclamation-triangle me-1"></i>
+            Identifiant ou mot de passe incorrect.
+          </div>
+        {% endif %}
+
+        {% if next %}
+          <div class="alert alert-secondary py-2 small mb-3">
+            <i class="bi bi-lock me-1"></i>
+            Connectez-vous pour accéder à cette page.
+          </div>
+        {% endif %}
+
+        <form method="post">
+          {% csrf_token %}
+          <div class="mb-3">
+            <label for="{{ form.username.id_for_label }}" class="form-label small">Identifiant</label>
+            <input type="text" name="{{ form.username.html_name }}"
+                   id="{{ form.username.id_for_label }}"
+                   class="form-control" autocomplete="username"
+                   autocapitalize="none" autofocus required>
+          </div>
+          <div class="mb-4">
+            <label for="{{ form.password.id_for_label }}" class="form-label small">Mot de passe</label>
+            <input type="password" name="{{ form.password.html_name }}"
+                   id="{{ form.password.id_for_label }}"
+                   class="form-control" autocomplete="current-password" required>
+          </div>
+          <input type="hidden" name="next" value="{{ next }}">
+          <button type="submit" class="btn btn-primary w-100">
+            <i class="bi bi-box-arrow-in-right me-1"></i>Se connecter
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

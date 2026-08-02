@@ -1,0 +1,29 @@
+{% if non_configure %}
+  <p class="text-secondary mb-0"><i class="bi bi-exclamation-triangle me-1"></i>
+    Non configuré — renseigner le compte Hi-Kumo dans l'onglet Climatisation.</p>
+{% elif erreur %}
+  <p class="text-danger small mb-0"><i class="bi bi-wifi-off me-1"></i>{{ erreur }}</p>
+{% else %}
+  {% if stale %}
+    <p class="small text-warning mb-2"><i class="bi bi-wifi-off me-1"></i>Dernière valeur connue.</p>
+  {% endif %}
+  {% for u in units %}
+    <div class="d-flex justify-content-between align-items-center {% if not forloop.last %}border-bottom{% endif %} py-2">
+      <div>
+        <div>{{ u.label }}</div>
+        <div class="small text-secondary">
+          {% if u.on %}{{ u.mode_fr }} — consigne {{ u.temperature|floatformat:0 }} °C{% else %}À l'arrêt{% endif %}
+        </div>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        {% if u.room_temperature %}
+          <strong style="color:#64748b">{{ u.room_temperature|floatformat:0 }} °C</strong>
+        {% endif %}
+        <span class="badge rounded-pill {% if u.on %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+          {% if u.on %}Marche{% else %}Arrêt{% endif %}</span>
+      </div>
+    </div>
+  {% empty %}
+    <p class="text-secondary mb-0">Aucune climatisation.</p>
+  {% endfor %}
+{% endif %}

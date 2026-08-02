@@ -1,0 +1,45 @@
+# Service systemd d'Homotic.
+#
+# Installation :
+#   sudo cp deploiement/homotic.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now homotic
+#
+# Journal : journalctl -u homotic -f
+
+[Unit]
+Description=Homotic — tableau de bord domestique
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=homotic
+Group=homotic
+WorkingDirectory=/home/apps/app_python/Homotic
+
+# Secrets et reglages : ce fichier contient la SECRET_KEY, il ne doit etre
+# lisible que par root (chmod 600). systemd le lit avant de deprivileger.
+EnvironmentFile=/etc/homotic.env
+
+# --noreload : l'autoreloader de Django lance un second processus, qui
+# ferait demarrer le scheduler en double — donc chaque tache et chaque
+# scenario executes deux fois. Voir core/apps.py.
+ExecStart=/home/apps/app_python/Homotic/.venv/bin/python manage.py runserver --noreload 127.0.0.1:8000
+
+Restart=always
+RestartSec=5
+
+# Durcissement : l'application n'a besoin que de son propre repertoire.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=/home/apps/app_python/Homotic
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

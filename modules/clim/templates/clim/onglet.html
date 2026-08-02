@@ -1,0 +1,170 @@
+{% extends "core/base.html" %}
+{% block title %}Climatisation — Homotic{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-1">
+  <h1 class="h4 mb-0">Climatisation</h1>
+  {% if configured %}
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="refresh">
+      <button class="btn btn-sm btn-outline-light rounded-pill px-3" title="Relire la passerelle Hi-Kumo">
+        <i class="bi bi-arrow-clockwise me-1"></i>Actualiser
+      </button>
+    </form>
+  {% endif %}
+</div>
+<p class="text-secondary small mb-4">Unités Hitachi Hi-Kumo
+  {% if ts %}<span class="ms-2">· données du {{ ts|date:"d/m H:i" }}</span>{% endif %}</p>
+
+{% if not configured %}
+  <div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle me-2"></i>Module non configuré :
+    renseigner le compte Hi-Kumo dans le paramétrage ci-dessous.
+  </div>
+{% elif erreur %}
+  <div class="alert alert-warning"><i class="bi bi-wifi-off me-2"></i>{{ erreur }}</div>
+{% endif %}
+
+{% if configured %}
+  <div class="row g-4 mb-4">
+    {% for u in units %}
+      <div class="col-12 col-lg-6">
+        <div class="card h-100">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <span><i class="bi bi-wind me-2"></i>{{ u.label }}</span>
+            <span class="badge rounded-pill {% if u.on %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+              {% if u.on %}Marche{% else %}Arrêt{% endif %}</span>
+          </div>
+          <div class="card-body">
+            <div class="row text-center mb-3">
+              <div class="col-6">
+                <div class="fs-4 fw-bold" style="color:#64748b">{{ u.room_temperature|default:"—" }}<span class="fs-6"> °C</span></div>
+                <div class="small text-secondary">Température de la pièce</div>
+              </div>
+              <div class="col-6">
+                <div class="fs-4 fw-bold">{{ u.temperature|default:"—" }}<span class="fs-6"> °C</span></div>
+                <div class="small text-secondary">Consigne</div>
+              </div>
+            </div>
+
+            <form method="post" class="mb-3">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="power">
+              <input type="hidden" name="room" value="{{ u.room }}">
+              <input type="hidden" name="on" value="{% if u.on %}0{% else %}1{% endif %}">
+              <button class="btn {% if u.on %}btn-danger{% else %}btn-success{% endif %} w-100">
+                {% if u.on %}Éteindre{% else %}Allumer{% endif %}
+              </button>
+            </form>
+
+            <div class="row g-2">
+              <div class="col-6 col-md-3">
+                <label class="form-label small">Consigne</label>
+                <form method="post">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="set">
+                  <input type="hidden" name="room" value="{{ u.room }}">
+                  <input type="hidden" name="field" value="temperature">
+                  <select name="value" class="form-select form-select-sm" onchange="this.form.submit()"
+                          {% if not u.on %}disabled{% endif %}>
+                    {% for t in temperatures %}
+                      <option value="{{ t }}" {% if t == u.temperature|floatformat:0|add:"0" %}selected{% endif %}>{{ t }} °C</option>
+                    {% endfor %}
+                  </select>
+                </form>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label small">Mode</label>
+                <form method="post">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="set">
+                  <input type="hidden" name="room" value="{{ u.room }}">
+                  <input type="hidden" name="field" value="mode">
+                  <select name="value" class="form-select form-select-sm" onchange="this.form.submit()"
+                          {% if not u.on %}disabled{% endif %}>
+                    {% for value, label in modes %}
+                      <option value="{{ value }}" {% if value == u.mode %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                </form>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label small">Ventilation</label>
+                <form method="post">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="set">
+                  <input type="hidden" name="room" value="{{ u.room }}">
+                  <input type="hidden" name="field" value="fan_mode">
+                  <select name="value" class="form-select form-select-sm" onchange="this.form.submit()"
+                          {% if not u.on %}disabled{% endif %}>
+                    {% for f in fans %}
+                      <option value="{{ f }}" {% if f == u.fan_mode %}selected{% endif %}>{{ f }}</option>
+                    {% endfor %}
+                  </select>
+                </form>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label small">Balayage</label>
+                <form method="post">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="set">
+                  <input type="hidden" name="room" value="{{ u.room }}">
+                  <input type="hidden" name="field" value="swing">
+                  <select name="value" class="form-select form-select-sm" onchange="this.form.submit()"
+                          {% if not u.on %}disabled{% endif %}>
+                    {% for s in swings %}
+                      <option value="{{ s }}" {% if s == u.swing %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                  </select>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    {% empty %}
+      <div class="col-12"><p class="text-secondary">Aucune climatisation détectée.</p></div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{# ---------- Paramétrage ---------- #}
+<div class="accordion" id="accordionParams">
+  <div class="accordion-item">
+    <h2 class="accordion-header">
+      <button class="accordion-button {% if configured %}collapsed{% endif %}" type="button"
+              data-bs-toggle="collapse" data-bs-target="#collapseParams">
+        <i class="bi bi-gear me-2"></i>Paramétrage — Compte Hi-Kumo
+      </button>
+    </h2>
+    <div id="collapseParams" class="accordion-collapse collapse {% if not configured %}show{% endif %}"
+         data-bs-parent="#accordionParams">
+      <div class="accordion-body">
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="params">
+          <div class="row g-3 mb-4">
+            <div class="col-12 col-md-5">
+              <label class="form-label">Email Hi-Kumo</label>
+              <input type="text" name="username" class="form-control" value="{{ params.username }}">
+            </div>
+            <div class="col-12 col-md-5">
+              <label class="form-label">Mot de passe</label>
+              <input type="password" name="password" class="form-control"
+                     placeholder="{% if params.has_password %}•••••• (laisser vide pour conserver){% else %}à renseigner{% endif %}">
+            </div>
+            <div class="col-6 col-md-2">
+              <label class="form-label">Rafraîchir toutes les… (min)</label>
+              <input type="number" name="tache_actualiser_minutes" class="form-control" min="0" value="{{ params.tache_minutes }}">
+              <div class="form-text">Lecture automatique en arrière-plan, sans ouvrir l'onglet.
+                <strong>0 = jamais</strong>. Pris en compte au prochain démarrage.</div>
+            </div>
+          </div>
+          <button class="btn btn-primary">Enregistrer</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

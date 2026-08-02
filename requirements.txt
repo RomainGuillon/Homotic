@@ -1,0 +1,7 @@
+# 5.1 minimum : LoginRequiredMiddleware, qui ferme l'application par defaut.
+# Le serveur tourne en 5.2 ; cette borne evite qu'une reinstallation sur une
+# machine plus ancienne ouvre silencieusement l'application a tout le monde.
+django>=5.1
+requests>=2.31
+apscheduler>=3.10
+pyoverkiz>=1.13

@@ -1,0 +1,120 @@
+{% load static %}<!doctype html>
+<html lang="fr" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Homotic{% endblock %}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  {# Thème reprenant l'identité visuelle de la v1 (chargé après Bootstrap) #}
+  <link href="{% static 'core/theme.css' %}?v={{ version_theme }}" rel="stylesheet">
+  <style>body { min-height: 100vh; }</style>
+</head>
+<body>
+  {% comment %} Trois zones de largeur égale (les deux latérales en
+     « flex-fill », base 0) : les onglets restent exactement au centre quel
+     que soit le contenu des actions de droite. Avec le « space-between » par
+     défaut de Bootstrap, ils se recalaient à droite sur les pages sans
+     actions, et la barre semblait bouger d'un onglet à l'autre. {% endcomment %}
+  <nav class="navbar bg-body-tertiary border-bottom mb-4">
+    <div class="container-fluid d-flex align-items-center flex-wrap gap-2">
+      <span class="navbar-brand d-flex align-items-center gap-2 flex-fill me-0">
+        <span style="width:30px;height:30px;border-radius:var(--r-md);
+                     background:linear-gradient(140deg, var(--accent-sage), var(--accent-steel));
+                     box-shadow:var(--shadow-soft);display:inline-block"></span>
+        Homotic <span class="badge text-bg-secondary">{{ app_version }}</span></span>
+      <ul class="nav nav-pills flex-shrink-0">
+        <li class="nav-item">
+          <a class="nav-link {% if active_tab == 'dashboard' %}active{% endif %}" href="{% url 'core:dashboard' %}">
+            <i class="bi bi-grid-1x2 me-1"></i>Tableau de bord</a>
+        </li>
+        {% for m in nav_modules %}
+          <li class="nav-item">
+            <a class="nav-link {% if active_tab == 'module:'|add:m.name %}active{% endif %}" href="{% url 'core:module_tab' m.name %}">
+              <i class="bi bi-{{ m.icon }} me-1"></i>{{ m.label }}</a>
+          </li>
+        {% endfor %}
+        <li class="nav-item">
+          <a class="nav-link {% if active_tab == 'journal' %}active{% endif %}" href="{% url 'core:journal' %}">
+            <i class="bi bi-journal-text me-1"></i>Journal</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link {% if active_tab == 'configuration' %}active{% endif %}" href="{% url 'core:configuration' %}">
+            <i class="bi bi-gear me-1"></i>Configuration</a>
+        </li>
+      </ul>
+      {% comment %} Actions propres à la page, dans la barre de navigation :
+         évite une seconde ligne juste pour quelques boutons. La zone existe
+         toujours, même vide : c'est elle qui tient le centrage des onglets.
+         {% endcomment %}
+      <div class="flex-fill d-flex align-items-center justify-content-end gap-2">
+        {% block nav_actions %}{% endblock %}
+        <button type="button" class="btn btn-sm btn-outline-secondary"
+                data-bs-toggle="modal" data-bs-target="#modalAPropos"
+                title="À propos de {{ app_nom }}">
+          <i class="bi bi-info-circle"></i></button>
+        {% comment %} Déconnexion en POST : c'est ce qu'impose LogoutView
+           depuis Django 5, pour qu'un simple lien piégé ne puisse pas
+           déconnecter à votre insu. {% endcomment %}
+        {% if user.is_authenticated %}
+          <form method="post" action="{% url 'logout' %}" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm btn-outline-secondary"
+                    title="Déconnecter {{ user.get_username }}">
+              <i class="bi bi-box-arrow-right"></i></button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  </nav>
+
+  <main class="container-fluid px-4">
+    {% if messages %}
+      {% for message in messages %}
+        <div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags }}{% endif %} alert-dismissible fade show" role="alert">
+          {{ message }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+
+  {% comment %} « À propos » : le contenu est chargé à l'ouverture, pas à
+     chaque page. L'état du système (modules, scheduler) coûte quelques
+     requêtes — inutile de les payer sur toutes les pages pour une fenêtre
+     qu'on ouvre trois fois par an. {% endcomment %}
+  <div class="modal fade" id="modalAPropos" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">
+            <i class="bi bi-info-circle me-2"></i>À propos de {{ app_nom }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="aProposContenu">
+          <p class="text-secondary mb-0">Chargement…</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Fermer</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    document.getElementById('modalAPropos').addEventListener('show.bs.modal', async (e) => {
+      const cible = document.getElementById('aProposContenu');
+      if (cible.dataset.charge) return;          // une seule fois par page
+      try {
+        const reponse = await fetch('{% url "core:a_propos" %}');
+        cible.innerHTML = await reponse.text();
+        cible.dataset.charge = '1';
+      } catch (err) {
+        cible.innerHTML = '<p class="text-danger mb-0">Informations indisponibles.</p>';
+      }
+    });
+  </script>
+</body>
+</html>

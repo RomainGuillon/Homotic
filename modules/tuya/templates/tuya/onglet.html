@@ -1,0 +1,141 @@
+{% extends "core/base.html" %}
+{% block title %}Capteurs — Homotic{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-1">
+  <h1 class="h4 mb-0">Capteurs</h1>
+  {% if configured %}
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="refresh">
+      <button class="btn btn-sm btn-outline-light rounded-pill px-3" title="Relire l'API Tuya">
+        <i class="bi bi-arrow-clockwise me-1"></i>Actualiser
+      </button>
+    </form>
+  {% endif %}
+</div>
+<p class="text-secondary small mb-4">Capteurs et prises connectées Tuya
+  {% if ts %}<span class="ms-2">· données du {{ ts|date:"d/m H:i" }}</span>{% endif %}</p>
+
+{% if not configured %}
+  <div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle me-2"></i>Module non configuré :
+    renseigner l'Access ID Tuya dans le paramétrage ci-dessous.
+  </div>
+{% elif erreur %}
+  <div class="alert alert-warning"><i class="bi bi-wifi-off me-2"></i>{{ erreur }}</div>
+{% endif %}
+
+{% if configured %}
+  {# ---------- Capteurs ---------- #}
+  <div class="row g-4 mb-4">
+    {% for s in sensors %}
+      <div class="col-12 col-md-6 col-xl-4">
+        <div class="card h-100">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <span><i class="bi bi-thermometer-half me-2"></i>{{ s.name }}</span>
+            <span class="badge rounded-pill {% if s.online %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+              {% if s.online %}En ligne{% else %}Hors ligne{% endif %}</span>
+          </div>
+          <div class="card-body d-flex justify-content-center">{{ s.svg|safe }}</div>
+        </div>
+      </div>
+    {% empty %}
+      <div class="col-12"><p class="text-secondary">Aucun capteur température/humidité détecté.</p></div>
+    {% endfor %}
+  </div>
+
+  {# ---------- Prises connectées ---------- #}
+  <h2 class="h5 mb-3">Prises connectées</h2>
+  <div class="row g-4 mb-4">
+    {% for p in plugs %}
+      <div class="col-12 col-md-6 col-xl-4">
+        <div class="card h-100">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <span>{{ p.name }}</span>
+            <span class="badge rounded-pill {% if p.online %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+              {% if p.online %}En ligne{% else %}Hors ligne{% endif %}</span>
+          </div>
+          <div class="card-body text-center">
+            {{ p.svg|safe }}
+            <form method="post" class="my-3">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="plug">
+              <input type="hidden" name="device_id" value="{{ p.id }}">
+              <input type="hidden" name="switch_code" value="{{ p.switch_code }}">
+              <input type="hidden" name="name" value="{{ p.name }}">
+              <input type="hidden" name="on" value="{% if p.state %}0{% else %}1{% endif %}">
+              <button class="btn {% if p.state %}btn-danger{% else %}btn-success{% endif %} w-100" style="max-width:200px">
+                {% if p.state %}Éteindre{% else %}Allumer{% endif %}
+              </button>
+            </form>
+            <div class="small text-secondary">
+              {% if p.schedule_lines %}
+                {% for line in p.schedule_lines %}{{ line }}<br>{% endfor %}
+              {% else %}
+                Pas de programmation
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    {% empty %}
+      <div class="col-12"><p class="text-secondary">Aucune prise connectée détectée.</p></div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{# ---------- Paramétrage (bloc dépliable) ---------- #}
+<div class="accordion" id="accordionParams">
+  <div class="accordion-item">
+    <h2 class="accordion-header">
+      <button class="accordion-button {% if configured %}collapsed{% endif %}" type="button"
+              data-bs-toggle="collapse" data-bs-target="#collapseParams">
+        <i class="bi bi-gear me-2"></i>Paramétrage — API Cloud Tuya
+      </button>
+    </h2>
+    <div id="collapseParams" class="accordion-collapse collapse {% if not configured %}show{% endif %}"
+         data-bs-parent="#accordionParams">
+      <div class="accordion-body">
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="params">
+          <div class="row g-3 mb-4">
+            <div class="col-12 col-md-4">
+              <label class="form-label">Access ID</label>
+              <input type="text" name="access_id" class="form-control" value="{{ params.access_id }}">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Access Secret</label>
+              <input type="password" name="access_secret" class="form-control"
+                     placeholder="{% if params.has_secret %}•••••• (laisser vide pour conserver){% else %}à renseigner{% endif %}">
+            </div>
+            <div class="col-6 col-md-2">
+              <label class="form-label">Région</label>
+              <select name="region" class="form-select">
+                <option value="eu" {% if params.region == "eu" %}selected{% endif %}>eu</option>
+                <option value="us" {% if params.region == "us" %}selected{% endif %}>us</option>
+                <option value="cn" {% if params.region == "cn" %}selected{% endif %}>cn</option>
+                <option value="in" {% if params.region == "in" %}selected{% endif %}>in</option>
+              </select>
+            </div>
+            <div class="col-6 col-md-2">
+              <label class="form-label">Rafraîchir toutes les… (min)</label>
+              <input type="number" name="tache_actualiser_minutes" class="form-control" min="0" value="{{ params.tache_minutes }}">
+              <div class="form-text">Lecture automatique en arrière-plan, sans ouvrir l'onglet.
+                <strong>0 = jamais</strong>. Pris en compte au prochain démarrage.</div>
+            </div>
+            <div class="col-12">
+              <div class="form-text">Identifiants du projet cloud sur
+                <a href="https://iot.tuya.com" target="_blank" rel="noopener">iot.tuya.com</a>.
+                Les fonctions scénario allumer_x/eteindre_x des prises apparaissent dans l'éditeur
+                après la première lecture des prises.</div>
+            </div>
+          </div>
+          <button class="btn btn-primary">Enregistrer</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

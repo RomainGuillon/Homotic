@@ -1,0 +1,239 @@
+{% extends "core/base.html" %}
+{% block title %}Tableau de bord — Homotic{% endblock %}
+
+{% block nav_actions %}
+  {% if blocs %}
+    {% if organiser %}
+      <span class="d-flex align-items-center gap-2">
+        <button type="submit" form="form-layout" class="btn btn-sm btn-primary">
+          <i class="bi bi-check-lg me-1"></i>Enregistrer</button>
+        <a href="{% url 'core:dashboard' %}" class="btn btn-sm btn-outline-secondary">Annuler</a>
+        <form method="post" action="{% url 'core:dashboard_layout_reset' %}"
+              onsubmit="return confirm('Revenir à la disposition par défaut ?');">
+          {% csrf_token %}
+          <button class="btn btn-sm btn-outline-danger">Par défaut</button>
+        </form>
+      </span>
+    {% else %}
+      <span class="d-flex align-items-center gap-2">
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="location.reload()"
+                title="Actualiser maintenant">
+          <i class="bi bi-arrow-clockwise"></i></button>
+        <form method="post" action="{% url 'core:dashboard_refresh' %}" class="d-flex">
+          {% csrf_token %}
+          <select name="minutes" class="form-select form-select-sm w-auto"
+                  onchange="this.form.submit()" title="Rafraîchissement automatique">
+            {% for m in refresh_choix %}
+              <option value="{{ m }}" {% if m == refresh_minutes %}selected{% endif %}>
+                {% if m %}auto {{ m }} min{% else %}auto désactivé{% endif %}</option>
+            {% endfor %}
+          </select>
+        </form>
+        <span class="small text-secondary" id="prochain-refresh"></span>
+        <a href="?organiser=1" class="btn btn-sm btn-outline-secondary" title="Organiser les blocs">
+          <i class="bi bi-arrows-move"></i></a>
+      </span>
+    {% endif %}
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+{% if organiser %}
+  <p class="text-secondary small mb-3">
+    <i class="bi bi-info-circle me-1"></i>Glissez les blocs pour changer l'ordre,
+    choisissez leur largeur, et réglez la hauteur à la poignée du bas
+    (0 = automatique), puis enregistrez.</p>
+{% endif %}
+
+{% if blocs %}
+  {% comment %} Le formulaire de disposition est VIDE : ses champs lui sont
+     rattachés par l'attribut « form ». Il ne doit surtout pas envelopper la
+     grille, car un formulaire ne peut pas en contenir un autre : l'analyseur
+     HTML ignorait alors la balise du premier formulaire imbriqué — le premier
+     switch du tableau de bord perdait son élément, donc son cadre. {% endcomment %}
+  <form method="post" action="{% url 'core:dashboard_layout' %}" id="form-layout" class="d-none">
+    {% csrf_token %}
+  </form>
+    <div class="row g-4" id="grille-blocs">
+      {% for b in blocs %}
+        <div class="col-12 col-xl-{{ b.width }} {% if organiser %}bloc-organisable{% endif %}"
+             data-key="{{ b.key }}" {% if organiser %}draggable="true"{% endif %}>
+          <input type="hidden" name="ordre" value="{{ b.key }}" form="form-layout">
+          <div class="card{% if not b.height %} h-100{% endif %}"
+               {% if b.height %}style="height:{{ b.height }}px"{% endif %}>
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <span>
+                {% if organiser %}<i class="bi bi-grip-vertical poignee me-1"></i>{% endif %}
+                <i class="bi bi-{{ b.icone }} me-2"></i>{{ b.titre }}</span>
+              {% if organiser %}
+                <span class="d-flex gap-1 align-items-center">
+                  <select name="largeur_{{ b.key }}" class="form-select form-select-sm w-auto"
+                          form="form-layout" title="Largeur du bloc">
+                    {% for valeur, label in largeurs %}
+                      <option value="{{ valeur }}" {% if valeur == b.width %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                  <input type="number" name="hauteur_{{ b.key }}" value="{{ b.height }}"
+                         min="0" max="1400" step="10" style="width:6.5rem"
+                         class="form-select form-select-sm hauteur-bloc"
+                         form="form-layout"
+                         title="Hauteur en pixels (0 = automatique)">
+                  <button type="button" class="btn btn-sm btn-outline-secondary" title="Hauteur automatique"
+                          onclick="hauteurAuto(this)"><i class="bi bi-arrows-collapse"></i></button>
+                </span>
+              {% endif %}
+            </div>
+            <div class="card-body"{% if b.height %} style="overflow-y:auto"{% endif %}>
+              {% if b.key == "scenarios" %}
+                {# Bloc Scénarios : contrôles regroupés par groupe #}
+                <div class="controles-rangee">
+                  {% comment %} Chaque groupe dans son cadre, y compris celui des
+                     contrôles sans groupe : seul le nom change. {% endcomment %}
+                  {% for g in groupes_controls %}
+                    <div class="groupe-controles">
+                      {% if g.nom %}<span class="groupe-titre">{{ g.nom }}</span>{% endif %}
+                      {% for c in g.controls %}{% include "core/_controle.html" %}{% endfor %}
+                    </div>
+                  {% endfor %}
+                </div>
+              {% else %}
+                {{ b.html|safe }}
+              {% endif %}
+            </div>
+            {% if organiser %}
+              <div class="poignee-hauteur" title="Glisser pour régler la hauteur"></div>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+
+  {% if organiser %}
+    <style>
+      .poignee-hauteur {
+        height: 12px; cursor: ns-resize; border-top: 1px dashed var(--bs-border-color, #444);
+        border-radius: 0 0 12px 12px; opacity: .5;
+      }
+      .poignee-hauteur:hover, .poignee-hauteur.active { opacity: 1; background: rgba(255,255,255,.06); }
+    </style>
+    <script>
+      /* Hauteur des blocs : la poignée du bas règle une hauteur réelle en
+         pixels, reportée dans le champ « hauteur_<clé> » qui sera enregistré.
+         0 = automatique (le bloc reprend la hauteur de son contenu). */
+      function hauteurAuto(btn) {
+        const colonne = btn.closest('[data-key]');
+        colonne.querySelector('.hauteur-bloc').value = 0;
+        appliquerHauteur(colonne, 0);
+      }
+      function appliquerHauteur(colonne, px) {
+        const carte = colonne.querySelector('.card');
+        const corps = colonne.querySelector('.card-body');
+        if (px > 0) {
+          carte.classList.remove('h-100');
+          carte.style.height = px + 'px';
+          corps.style.overflowY = 'auto';
+        } else {
+          carte.classList.add('h-100');
+          carte.style.height = '';
+          corps.style.overflowY = '';
+        }
+      }
+      document.querySelectorAll('.hauteur-bloc').forEach(champ => {
+        champ.addEventListener('input', () => {
+          appliquerHauteur(champ.closest('[data-key]'), parseInt(champ.value, 10) || 0);
+        });
+      });
+      document.querySelectorAll('.poignee-hauteur').forEach(poignee => {
+        poignee.addEventListener('mousedown', debut => {
+          debut.preventDefault();
+          const colonne = poignee.closest('[data-key]');
+          const carte = colonne.querySelector('.card');
+          const champ = colonne.querySelector('.hauteur-bloc');
+          const depart = debut.clientY;
+          /* Point de départ : la hauteur réelle actuelle, même en mode auto,
+             pour que le premier pixel de glissement ne fasse pas sauter le bloc. */
+          const hauteurDepart = carte.offsetHeight;
+          poignee.classList.add('active');
+          const bouger = e => {
+            const px = Math.max(120, Math.min(1400, hauteurDepart + e.clientY - depart));
+            champ.value = Math.round(px / 10) * 10;
+            appliquerHauteur(colonne, px);
+          };
+          const finir = () => {
+            poignee.classList.remove('active');
+            document.removeEventListener('mousemove', bouger);
+            document.removeEventListener('mouseup', finir);
+          };
+          document.addEventListener('mousemove', bouger);
+          document.addEventListener('mouseup', finir);
+        });
+      });
+
+      /* Réordonnancement par glisser-déposer : on déplace les colonnes dans la
+         grille, l'ordre des champs cachés « ordre » suit automatiquement. */
+      const grille = document.getElementById('grille-blocs');
+      let source = null;
+
+      grille.querySelectorAll('.bloc-organisable').forEach(bloc => {
+        bloc.addEventListener('dragstart', e => {
+          source = bloc;
+          bloc.classList.add('drag-en-cours');
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        bloc.addEventListener('dragend', () => {
+          bloc.classList.remove('drag-en-cours');
+          grille.querySelectorAll('.cible-drop').forEach(b => b.classList.remove('cible-drop'));
+          source = null;
+        });
+        bloc.addEventListener('dragover', e => {
+          e.preventDefault();
+          if (bloc !== source) bloc.classList.add('cible-drop');
+        });
+        bloc.addEventListener('dragleave', () => bloc.classList.remove('cible-drop'));
+        bloc.addEventListener('drop', e => {
+          e.preventDefault();
+          bloc.classList.remove('cible-drop');
+          if (!source || bloc === source) return;
+          const blocs = Array.from(grille.children);
+          if (blocs.indexOf(source) < blocs.indexOf(bloc)) {
+            bloc.after(source);
+          } else {
+            bloc.before(source);
+          }
+        });
+      });
+    </script>
+  {% endif %}
+  {% if not organiser and refresh_minutes %}
+    {% comment %} Rafraîchissement automatique : jamais en mode « Organiser », sinon un
+       rechargement en pleine réorganisation ferait perdre la disposition.
+       Le compte à rebours repart de zéro à chaque retour sur l'onglet, pour
+       ne pas recharger dans la seconde qui suit. {% endcomment %}
+    <script>
+      (function () {
+        const periode = {{ refresh_minutes }} * 60;
+        const affichage = document.getElementById('prochain-refresh');
+        let reste = periode;
+        setInterval(function () {
+          if (document.hidden) { reste = periode; return; }
+          reste -= 1;
+          if (reste <= 0) { location.reload(); return; }
+          const m = Math.floor(reste / 60), s = reste % 60;
+          if (affichage) {
+            affichage.textContent = m
+              ? `dans ${m} min ${String(s).padStart(2, '0')}`
+              : `dans ${s} s`;
+          }
+        }, 1000);
+      })();
+    </script>
+  {% endif %}
+{% else %}
+  <div class="text-center text-secondary py-5">
+    <i class="bi bi-grid-1x2 display-4 d-block mb-3"></i>
+    <p class="mb-1">Le tableau de bord est vide pour le moment.</p>
+    <p class="small">Créez un bouton ou un switch dans l'onglet Configuration,
+      ou activez un module, pour voir apparaître des blocs.</p>
+  </div>
+{% endif %}
+{% endblock %}
