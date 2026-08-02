@@ -91,6 +91,13 @@ sudo git reset --hard origin/main
 `reset --hard` remplace les fichiers suivis par ceux du dépôt. Les fichiers
 non suivis — `db.sqlite3`, `.venv/`, `staticfiles/` — ne sont pas touchés.
 
+Rattacher la branche locale à celle du dépôt — `git init` suivi d'un `reset`
+ne configure pas ce suivi, et `git pull` refuserait de deviner :
+
+```bash
+sudo git branch --set-upstream-to=origin/main main
+```
+
 Remettre les droits, que `git init` a pu bousculer :
 
 ```bash

@@ -15,12 +15,17 @@ set -euo pipefail
 PROJET="/home/apps/app_python/Homotic"
 VENV="$PROJET/.venv/bin"
 SERVICE="homotic"
+BRANCHE="main"
 
 cd "$PROJET"
 
 echo "→ Recuperation du code"
 avant=$(git rev-parse --short HEAD)
-git pull --ff-only
+# « origin main » explicite plutot qu'un « git pull » nu : le script ne
+# depend alors pas du suivi de branche, qui n'est pas configure apres un
+# rattachement par « git init » + « fetch » + « reset --hard ».
+git fetch origin "$BRANCHE"
+git merge --ff-only "origin/$BRANCHE"
 apres=$(git rev-parse --short HEAD)
 
 if [ "$avant" = "$apres" ]; then
