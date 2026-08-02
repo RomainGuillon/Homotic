@@ -67,8 +67,18 @@ de déploiement resterait bloqué sans rien afficher.
 Coller la clé publique dans GitHub → dépôt → *Settings* → *Deploy keys* → *Add
 deploy key*, **sans** cocher « Allow write access ».
 
-Rattacher le répertoire existant au dépôt, sans perdre la base de données ni
-l'environnement virtuel (tous deux ignorés par git, donc intouchés) :
+Le répertoire appartient à `homotic`, alors que git s'exécutera en `root`.
+Depuis git 2.35, cette différence bloque toute opération (« dubious
+ownership ») : c'est une protection contre un dépôt piégé déposé par un autre
+utilisateur. Ici la situation est voulue, on déclare l'exception une fois :
+
+```bash
+sudo git config --global --add safe.directory /home/apps/app_python/Homotic
+```
+
+Rattacher ensuite le répertoire existant au dépôt, sans perdre la base de
+données ni l'environnement virtuel (tous deux ignorés par git, donc
+intouchés) :
 
 ```bash
 cd /home/apps/app_python/Homotic
