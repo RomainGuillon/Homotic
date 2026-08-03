@@ -51,34 +51,74 @@
 </div>
 
 {% if page.object_list %}
-  <table class="table table-sm table-hover align-middle">
-    <thead>
-      <tr>
-        <th style="width:160px">Date</th>
-        <th style="width:140px">Module</th>
-        <th style="width:130px">Niveau</th>
-        <th>Message</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for log in page.object_list %}
+  {% comment %} Le formulaire de purge enveloppe la barre d'outils ET le
+     tableau : les cases cochées et les boutons doivent partir ensemble. Il
+     transporte aussi le filtre courant, pour y revenir après suppression et
+     pour que « Purger le filtre » sache quoi purger. {% endcomment %}
+  <form method="post" action="{% url 'core:journal_purge' %}" id="formPurge">
+    {% csrf_token %}
+    <input type="hidden" name="module" value="{{ current_module }}">
+    <input type="hidden" name="level" value="{{ current_level }}">
+
+    <div class="d-flex align-items-center gap-2 mb-2">
+      <button type="submit" name="portee" value="selection" id="btnSelection"
+              class="btn btn-sm btn-outline-danger" disabled>
+        <i class="bi bi-trash me-1"></i>Supprimer la sélection
+        (<span id="nbSelection">0</span>)
+      </button>
+
+      {% if filtre_actif %}
+        <button type="submit" name="portee" value="filtre"
+                class="btn btn-sm btn-outline-warning"
+                data-confirmer="Supprimer les {{ total_filtre }} entrée{{ total_filtre|pluralize }} correspondant au filtre courant ?">
+          <i class="bi bi-funnel me-1"></i>Purger le filtre ({{ total_filtre }})
+        </button>
+      {% endif %}
+
+      <button type="submit" name="portee" value="tout"
+              class="btn btn-sm btn-outline-danger ms-auto"
+              data-confirmer="Vider complètement le journal ({{ total }} entrée{{ total|pluralize }}) ? Cette action est définitive.">
+        <i class="bi bi-trash3 me-1"></i>Tout purger ({{ total }})
+      </button>
+    </div>
+
+    <table class="table table-sm table-hover align-middle">
+      <thead>
         <tr>
-          <td class="text-secondary">{{ log.created_at|date:"d/m/Y H:i:s" }}</td>
-          <td><span class="badge text-bg-secondary">{{ log.module }}</span></td>
-          <td>
-            {% if log.level == "ERROR" %}
-              <span class="badge text-bg-danger">Erreur</span>
-            {% elif log.level == "WARNING" %}
-              <span class="badge text-bg-warning">Avertissement</span>
-            {% else %}
-              <span class="badge text-bg-info">Info</span>
-            {% endif %}
-          </td>
-          <td>{{ log.message }}</td>
+          <th style="width:34px">
+            <input type="checkbox" class="form-check-input" id="cocheTout"
+                   title="Tout sélectionner sur cette page">
+          </th>
+          <th style="width:160px">Date</th>
+          <th style="width:140px">Module</th>
+          <th style="width:130px">Niveau</th>
+          <th>Message</th>
         </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        {% for log in page.object_list %}
+          <tr>
+            <td>
+              <input type="checkbox" class="form-check-input coche-log"
+                     name="ids" value="{{ log.pk }}">
+            </td>
+            <td class="text-secondary">{{ log.created_at|date:"d/m/Y H:i:s" }}</td>
+            <td><span class="badge text-bg-secondary">{{ log.module }}</span></td>
+            <td>
+              {% if log.level == "ERROR" %}
+                <span class="badge text-bg-danger">Erreur</span>
+              {% elif log.level == "WARNING" %}
+                <span class="badge text-bg-warning">Avertissement</span>
+              {% else %}
+                <span class="badge text-bg-info">Info</span>
+              {% endif %}
+            </td>
+            <td>{{ log.message }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </form>
 
   {% if page.has_other_pages %}
     <nav class="d-flex justify-content-center">
@@ -99,4 +139,42 @@
     <p>Aucune entrée dans le journal{% if current_module or current_level %} avec ces filtres{% endif %}.</p>
   </div>
 {% endif %}
+
+<script>
+  (() => {
+    const form = document.getElementById('formPurge');
+    if (!form) return;
+
+    const cocheTout = document.getElementById('cocheTout');
+    const coches = [...form.querySelectorAll('.coche-log')];
+    const bouton = document.getElementById('btnSelection');
+    const compteur = document.getElementById('nbSelection');
+
+    // La sélection ne porte que sur la page affichée : pour supprimer au-delà
+    // des 50 lignes visibles, c'est « Purger le filtre » ou « Tout purger ».
+    const majCompteur = () => {
+      const n = coches.filter(c => c.checked).length;
+      compteur.textContent = n;
+      bouton.disabled = n === 0;
+      cocheTout.checked = n > 0 && n === coches.length;
+      cocheTout.indeterminate = n > 0 && n < coches.length;
+    };
+
+    cocheTout.addEventListener('change', () => {
+      coches.forEach(c => { c.checked = cocheTout.checked; });
+      majCompteur();
+    });
+    coches.forEach(c => c.addEventListener('change', majCompteur));
+
+    // Confirmation portée par le bouton qui a servi à soumettre : une purge
+    // large est irréversible, la suppression d'une sélection visible ne l'est
+    // pas assez pour mériter une boîte de dialogue.
+    form.addEventListener('submit', (e) => {
+      const question = e.submitter && e.submitter.dataset.confirmer;
+      if (question && !window.confirm(question)) e.preventDefault();
+    });
+
+    majCompteur();
+  })();
+</script>
 {% endblock %}

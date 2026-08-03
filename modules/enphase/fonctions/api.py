@@ -6,6 +6,7 @@ aussi des variables globales pour les scénarios.
 """
 
 import json
+import threading
 from datetime import datetime, timedelta
 
 import requests
@@ -84,8 +85,12 @@ def _get_json(path):
     url = f"https://{cfg['host']}{path}"
 
     def _fetch(tok):
+        # Timeouts (connexion, lecture) courts : l'Envoy est sur le réseau
+        # local, s'il n'a pas répondu en 5 s il ne répondra pas. Un timeout
+        # long ne rend service à personne — il fige la page qui attend.
         return requests.get(
-            url, headers={"Authorization": f"Bearer {tok}"}, verify=False, timeout=10
+            url, headers={"Authorization": f"Bearer {tok}"}, verify=False,
+            timeout=(2, 5),
         )
 
     resp = _fetch(token)
@@ -109,14 +114,88 @@ def _find(items, key, value):
     return {}
 
 
-def _read_meters():
-    """Production lue sur les micro-onduleurs, conso/réseau sur les pinces."""
+def _meters_index():
+    """Carte ``{measurementType: {eid, state}}`` des pinces, gardée en base.
+
+    Le brochage des pinces est une propriété du matériel : il ne change pas
+    d'un relevé à l'autre. Le redemander à chaque mesure, c'était une requête
+    passée à réapprendre ce qu'on savait déjà.
+    """
+    cached = get_setting("meters_index", module=MODULE)
+    if cached:
+        try:
+            idx = json.loads(cached)
+            if isinstance(idx, dict) and idx:
+                return idx
+        except (ValueError, TypeError):
+            pass
+
+    idx = {}
+    for m in _get_json("/ivp/meters") or []:
+        mtype, eid = m.get("measurementType"), m.get("eid")
+        if mtype and eid is not None:
+            idx[mtype] = {"eid": eid, "state": m.get("state", "")}
+    set_setting("meters_index", json.dumps(idx), module=MODULE)
+    return idx
+
+
+def _read_via_meters():
+    """Relevé complet via les pinces, en une seule requête. None si impossible.
+
+    Source préférée à ``/production.json`` : cet endpoint fait interroger les
+    micro-onduleurs un par un par l'Envoy, et une seule radio qui ne répond
+    pas le fait pendre plusieurs dizaines de secondes. Les pinces, elles,
+    répondent en quelques centaines de millisecondes — mêmes grandeurs,
+    mesurées au tableau plutôt qu'en toiture.
+    """
+    idx = _meters_index()
+    prod, conso, net = (idx.get("production"), idx.get("total-consumption"),
+                        idx.get("net-consumption"))
+    if not (prod and conso and net):
+        return None
+    if any(m.get("state") not in ("enabled", "") for m in (prod, conso, net)):
+        return None  # une pince non activée renverrait des zéros crédibles
+
+    readings = {
+        r["eid"]: r for r in (_get_json("/ivp/meters/readings") or [])
+        if isinstance(r, dict) and r.get("eid") is not None
+    }
+    rp, rc, rn = (readings.get(prod["eid"]), readings.get(conso["eid"]),
+                  readings.get(net["eid"]))
+    if not (rp and rc and rn):
+        return None
+
+    def f(reading, cle):
+        return float(reading.get(cle) or 0)
+
+    imp_life, exp_life = f(rn, "actEnergyDlvd"), f(rn, "actEnergyRcvd")
+    return {
+        "source": "meters",
+        "prod_w": f(rp, "activePower"),
+        "conso_w": f(rc, "activePower"),
+        "net_w": f(rn, "activePower"),
+        "prod_life": f(rp, "actEnergyDlvd"),
+        "conso_life": f(rc, "actEnergyDlvd"),
+        # net cumulé = ce qui est entré moins ce qui est ressorti
+        "net_life": imp_life - exp_life,
+        "imp_life": imp_life,
+        "exp_life": exp_life,
+    }
+
+
+def _read_via_production_json():
+    """Ancien chemin : production sur les micro-onduleurs. Lent mais universel.
+
+    Conservé pour les installations sans pince de production, où les pinces
+    ne suffisent pas.
+    """
     data = _get_json("/production.json")
     production = data.get("production", [])
     prod = _find(production, "type", "inverters") or _find(production, "measurementType", "production")
     conso = _find(data.get("consumption", []), "measurementType", "total-consumption")
     net = _find(data.get("consumption", []), "measurementType", "net-consumption")
-    return {
+    releve = {
+        "source": "production_json",
         "prod_w": float(prod.get("wNow", 0) or 0),
         "conso_w": float(conso.get("wNow", 0) or 0),
         "net_w": float(net.get("wNow", 0) or 0),
@@ -125,30 +204,32 @@ def _read_meters():
         "net_life": float(net.get("whLifetime", 0) or 0),
     }
 
-
-def _meter_gross():
-    """Compteurs bruts réseau (Wh) : (import_life, export_life) ou (None, None)."""
+    # Compteurs bruts réseau : import et export séparés, que production.json
+    # ne distingue pas (il n'expose que leur solde).
     try:
-        meters = _get_json("/ivp/meters")
-        readings = _get_json("/ivp/meters/readings")
+        net_meter = _meters_index().get("net-consumption")
+        if net_meter:
+            for r in _get_json("/ivp/meters/readings") or []:
+                if r.get("eid") == net_meter["eid"]:
+                    imp, exp = r.get("actEnergyDlvd"), r.get("actEnergyRcvd")
+                    if imp is not None and exp is not None:
+                        releve["imp_life"] = float(imp)
+                        releve["exp_life"] = float(exp)
+                    break
     except Exception:
-        return None, None
+        pass  # les cumuls du jour se rabattront sur le solde net
+    return releve
 
-    net_eid = None
-    for m in meters if isinstance(meters, list) else []:
-        if m.get("measurementType") == "net-consumption":
-            net_eid = m.get("eid")
-            break
-    if net_eid is None:
-        return None, None
 
-    for r in readings if isinstance(readings, list) else []:
-        if r.get("eid") == net_eid:
-            imp = r.get("actEnergyDlvd")
-            exp = r.get("actEnergyRcvd")
-            if imp is not None and exp is not None:
-                return float(imp), float(exp)
-    return None, None
+def _read_meters():
+    """Relevé instantané + cumuls, par le chemin le plus rapide disponible."""
+    releve = None
+    try:
+        releve = _read_via_meters()
+    except Exception as exc:
+        journal(f"Lecture par les pinces impossible ({exc}) — repli sur "
+                f"production.json", module=MODULE, level=LogEntry.WARNING)
+    return releve if releve is not None else _read_via_production_json()
 
 
 # ----------------------------------------------------------------------
@@ -174,13 +255,24 @@ def get_energy():
     m = _read_meters()
     today = datetime.now().strftime("%Y-%m-%d")
 
-    imp_life, exp_life = _meter_gross()
-
     state = _load_state()
     current = {"prod": m["prod_life"], "conso": m["conso_life"], "net": m["net_life"]}
-    if imp_life is not None and exp_life is not None:
-        current["imp"] = imp_life
-        current["exp"] = exp_life
+    if "imp_life" in m and "exp_life" in m:
+        current["imp"] = m["imp_life"]
+        current["exp"] = m["exp_life"]
+
+    # Les compteurs cumulés des pinces et ceux des micro-onduleurs ne partent
+    # pas du même zéro : comparer le relevé d'une source à une référence prise
+    # sur l'autre donnerait une journée aberrante (souvent des mégawattheures).
+    # Un changement de source repart donc sur une référence neuve, quitte à
+    # perdre le début de la journée en cours.
+    source = m.get("source", "")
+    if state and state.get("source") not in (None, source):
+        journal(
+            f"Source des mesures : {state.get('source')} → {source}. "
+            f"Cumuls du jour repartis de zéro.", module=MODULE,
+        )
+        state = None
 
     if not state or state.get("date") != today:
         # Nouveau jour : référence = dernier relevé de la veille, sinon l'actuel
@@ -188,6 +280,7 @@ def get_energy():
         state = {"date": today, "base": base, "last": current}
     else:
         state["last"] = current
+    state["source"] = source
     _save_state(state)
 
     base = state["base"]
@@ -222,7 +315,68 @@ def get_energy():
 # Cache + tâche périodique
 # ----------------------------------------------------------------------
 
+# Coupe-circuit : après plusieurs échecs d'affilée, on arrête d'appeler
+# l'Envoy pendant quelques minutes. Sans ça, une passerelle injoignable fait
+# attendre chaque affichage du tableau de bord (3 requêtes × timeout) et
+# remplit le journal de milliers de lignes identiques.
+_CIRCUIT = {"echecs": 0, "rouvre_a": None}
+CIRCUIT_SEUIL = 3          # échecs consécutifs avant ouverture
+CIRCUIT_PAUSE_MIN = 5      # minutes sans aucun appel une fois ouvert
+
+# Un seul relevé Envoy à la fois. Le rendu d'une page appelle les fonctions
+# d'info les unes après les autres (production, conso, import, export...) et
+# chacune passe par get_energy_cached : sans verrou, un cache expiré fait
+# partir autant d'interrogations simultanées vers la passerelle, qui sature.
+# Avec le verrou, la première rafraîchit, les autres trouvent le cache prêt.
+_VERROU = threading.Lock()
+
+
+def circuit_ouvert():
+    """True si l'on est en pause après une série d'échecs."""
+    jusqu = _CIRCUIT["rouvre_a"]
+    return bool(jusqu and datetime.now() < jusqu)
+
+
+def _circuit_succes():
+    if _CIRCUIT["echecs"]:
+        journal("Envoy de nouveau joignable", module=MODULE)
+    _CIRCUIT["echecs"] = 0
+    _CIRCUIT["rouvre_a"] = None
+
+
+def _circuit_echec(exc):
+    """Compte l'échec et ne journalise que ce qui apprend quelque chose.
+
+    Les échecs suivants sont muets : mille fois « Read timed out » ne dit
+    rien de plus que la première fois, et noient le reste du journal.
+    """
+    _CIRCUIT["echecs"] += 1
+    n = _CIRCUIT["echecs"]
+    if n < CIRCUIT_SEUIL:
+        journal(f"Envoy injoignable ({n}/{CIRCUIT_SEUIL}) : {exc}",
+                module=MODULE, level=LogEntry.WARNING)
+    elif n == CIRCUIT_SEUIL:
+        journal(
+            f"Envoy injoignable après {n} tentatives — appels suspendus "
+            f"{CIRCUIT_PAUSE_MIN} min : {exc}",
+            module=MODULE, level=LogEntry.ERROR,
+        )
+    if n >= CIRCUIT_SEUIL:
+        _CIRCUIT["rouvre_a"] = datetime.now() + timedelta(minutes=CIRCUIT_PAUSE_MIN)
+
+
 def get_energy_cached(force=False, ttl_minutes=2):
+    """Dernières mesures, du cache si possible, de l'Envoy sinon.
+
+    Sérialisé par ``_VERROU`` : les appels concurrents attendent le premier
+    et repartent avec le cache qu'il vient d'écrire, au lieu d'interroger la
+    passerelle chacun de leur côté.
+    """
+    with _VERROU:
+        return _relever(force=force, ttl_minutes=ttl_minutes)
+
+
+def _relever(force=False, ttl_minutes=2):
     now = datetime.now()
     raw = get_setting("cache_energy", module=MODULE)
     cached_data, cached_ts = None, None
@@ -238,13 +392,24 @@ def get_energy_cached(force=False, ttl_minutes=2):
         if now - cached_ts < timedelta(minutes=ttl_minutes):
             return cached_data, cached_ts, ""
 
+    # Coupe-circuit ouvert : on rend la main tout de suite avec la dernière
+    # valeur connue. C'est ce qui empêche la page d'énergie et le tableau de
+    # bord de rester bloqués tant que la passerelle ne répond pas.
+    if circuit_ouvert():
+        msg = "Passerelle injoignable — appels suspendus, dernière valeur connue."
+        if cached_data is not None:
+            return cached_data, cached_ts, msg
+        return None, None, "Passerelle Envoy injoignable (appels suspendus)."
+
     try:
         data = get_energy()
     except Exception as exc:
-        journal(f"Erreur Envoy : {exc}", module=MODULE, level=LogEntry.ERROR)
+        _circuit_echec(exc)
         if cached_data is not None:
             return cached_data, cached_ts, f"Passerelle injoignable ({exc}) — dernière valeur connue."
         return None, None, str(exc)
+
+    _circuit_succes()
 
     set_setting("cache_energy", json.dumps({"ts": now.isoformat(), "data": data}), module=MODULE)
     # Chaque mesure fraîche alimente la courbe réelle du jour (voir

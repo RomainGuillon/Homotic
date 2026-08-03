@@ -5,6 +5,7 @@ import importlib
 from django.contrib import messages
 from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from . import liaisons, scheduler
@@ -18,6 +19,7 @@ from .services import (
     purger_journal,
     set_control_state,
     set_setting,
+    supprimer_journal,
 )
 
 # Icônes proposées à la création d'un bouton poussoir (Bootstrap Icons)
@@ -347,10 +349,49 @@ def journal_view(request):
             "current_module": module,
             "current_level": level,
             "total": LogEntry.objects.count(),
+            # Nombre de lignes que le filtre courant affiche : c'est ce que
+            # supprimerait « Purger le filtre », autant l'annoncer.
+            "total_filtre": paginator.count,
+            "filtre_actif": bool(module or level),
             "retention": jours,
             "retention_choix": sorted({0, 7, 30, 90, 180, 365, jours}),
         },
     )
+
+
+@require_POST
+def journal_purge(request):
+    """Vide le journal : la sélection cochée, le filtre courant, ou tout.
+
+    Trois portées plutôt qu'un seul bouton « tout effacer » : quand un module
+    part en boucle d'erreur (une API injoignable qui écrit mille lignes), on
+    veut pouvoir nettoyer ce module-là sans perdre l'historique du reste.
+    """
+    portee = request.POST.get("portee", "")
+    module = request.POST.get("module", "")
+    level = request.POST.get("level", "")
+
+    if portee == "selection":
+        ids = [int(i) for i in request.POST.getlist("ids") if i.isdigit()]
+        if not ids:
+            messages.info(request, "Aucune ligne sélectionnée.")
+            return redirect(f"{reverse('core:journal')}?module={module}&level={level}")
+        supprimes = supprimer_journal(ids=ids)
+    elif portee == "filtre":
+        supprimes = supprimer_journal(module=module, level=level)
+    elif portee == "tout":
+        supprimes = supprimer_journal()
+        module = level = ""  # le filtre n'a plus rien à filtrer
+    else:
+        messages.error(request, "Portée de purge inconnue.")
+        return redirect("core:journal")
+
+    messages.success(
+        request,
+        f"{supprimes} entrée{'s' if supprimes > 1 else ''} supprimée"
+        f"{'s' if supprimes > 1 else ''} du journal.",
+    )
+    return redirect(f"{reverse('core:journal')}?module={module}&level={level}")
 
 
 @require_POST

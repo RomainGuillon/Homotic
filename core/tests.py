@@ -294,6 +294,83 @@ class PurgeDuJournal(TestCase):
         self.assertFalse(LogEntry.objects.filter(pk=vieille.pk).exists())
 
 
+class PurgeManuelleDuJournal(TestCase):
+    """Le bouton de purge de l'onglet Journal.
+
+    Une purge est irréversible : ce qui compte ici est moins qu'elle
+    supprime que qu'elle ne supprime *que* ce qui était visé. Un module en
+    boucle d'erreur doit pouvoir être nettoyé sans emporter l'historique du
+    reste.
+    """
+
+    def setUp(self):
+        connecte(self.client)
+
+    def _entrees(self):
+        from core.models import LogEntry
+        from core.services import journal
+
+        return {
+            "err": journal("panne", module="enphase", level=LogEntry.ERROR),
+            "info": journal("relevé", module="enphase"),
+            "autre": journal("bascule", module="tuya"),
+        }
+
+    def test_purge_de_la_selection(self):
+        from core.models import LogEntry
+
+        e = self._entrees()
+        self.client.post("/journal/purger/",
+                         {"portee": "selection", "ids": [e["err"].pk, e["autre"].pk]})
+
+        restants = set(LogEntry.objects.values_list("pk", flat=True))
+        self.assertEqual(restants, {e["info"].pk})
+
+    def test_purge_du_filtre_courant(self):
+        from core.models import LogEntry
+
+        e = self._entrees()
+        self.client.post("/journal/purger/",
+                         {"portee": "filtre", "module": "enphase", "level": "ERROR"})
+
+        restants = set(LogEntry.objects.values_list("pk", flat=True))
+        self.assertEqual(restants, {e["info"].pk, e["autre"].pk})
+
+    def test_purge_totale(self):
+        from core.models import LogEntry
+
+        self._entrees()
+        self.client.post("/journal/purger/", {"portee": "tout"})
+
+        self.assertEqual(LogEntry.objects.count(), 0,
+                         "un journal vidé doit rester vide, sans ligne de compte-rendu")
+
+    def test_selection_vide_ne_supprime_rien(self):
+        """Le bouton est désactivé côté navigateur, mais la vue ne doit pas
+        interpréter « aucune ligne » comme « toutes les lignes »."""
+        from core.models import LogEntry
+
+        self._entrees()
+        self.client.post("/journal/purger/", {"portee": "selection"})
+
+        self.assertEqual(LogEntry.objects.count(), 3)
+
+    def test_portee_inconnue_ne_supprime_rien(self):
+        from core.models import LogEntry
+
+        self._entrees()
+        self.client.post("/journal/purger/", {"portee": "n'importe quoi"})
+
+        self.assertEqual(LogEntry.objects.count(), 3)
+
+    def test_purge_refusee_en_get(self):
+        from core.models import LogEntry
+
+        self._entrees()
+        self.assertEqual(self.client.get("/journal/purger/").status_code, 405)
+        self.assertEqual(LogEntry.objects.count(), 3)
+
+
 class AccesProtege(TestCase):
     """L'application est joignable depuis Internet : rien ne doit répondre
     sans session, et l'oubli d'un décorateur ne doit pas ouvrir une brèche.
@@ -340,6 +417,19 @@ class AccesProtege(TestCase):
         self.assertIn("/comptes/login/", reponse["Location"])
         control.refresh_from_db()
         self.assertFalse(control.is_on, "un anonyme a pu basculer un switch")
+
+    def test_purge_du_journal_refusee_sans_session(self):
+        """Effacer les traces est exactement ce que ferait un intrus."""
+        from core.models import LogEntry
+        from core.services import journal
+
+        journal("trace à conserver")
+
+        reponse = self.client.post("/journal/purger/", {"portee": "tout"})
+
+        self.assertEqual(reponse.status_code, 302)
+        self.assertIn("/comptes/login/", reponse["Location"])
+        self.assertEqual(LogEntry.objects.count(), 1, "un anonyme a pu vider le journal")
 
     def test_l_application_reste_fermee_par_defaut(self):
         """La garantie tient au middleware, pas à un décorateur par vue :

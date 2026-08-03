@@ -54,6 +54,29 @@ def purger_journal(jours=None):
     return supprimes
 
 
+def supprimer_journal(ids=None, module="", level=""):
+    """Supprime des entrées de journal à la demande (bouton de l'onglet Journal).
+
+    - ``ids`` : suppression d'une sélection précise (les cases cochées) ;
+    - sinon ``module`` / ``level`` : suppression de tout ce que le filtre
+      courant affiche — sans filtre, c'est donc tout le journal.
+
+    Contrairement à ``purger_journal``, on ne journalise pas ici : la ligne
+    « X entrées supprimées » ressusciterait juste après un « tout purger »,
+    et un journal qu'on vient de vider doit rester vide.
+    """
+    qs = LogEntry.objects.all()
+    if ids is not None:
+        qs = qs.filter(pk__in=ids)
+    else:
+        if module:
+            qs = qs.filter(module=module)
+        if level:
+            qs = qs.filter(level=level)
+    supprimes, _ = qs.delete()
+    return supprimes
+
+
 def get_setting(key, module="core", default=None):
     """Retourne la valeur d'un réglage, ou ``default`` s'il n'existe pas."""
     try:

@@ -8,6 +8,7 @@ urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("journal/", views.journal_view, name="journal"),
     path("journal/conservation/", views.journal_retention, name="journal_retention"),
+    path("journal/purger/", views.journal_purge, name="journal_purge"),
     path("a-propos/", views.a_propos, name="a_propos"),
     path("tableau-de-bord/rafraichir/", views.dashboard_refresh, name="dashboard_refresh"),
     path("tableau-de-bord/disposition/", views.dashboard_layout, name="dashboard_layout"),
