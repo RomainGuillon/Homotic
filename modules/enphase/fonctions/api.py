@@ -148,36 +148,49 @@ def _read_via_meters():
     répondent en quelques centaines de millisecondes — mêmes grandeurs,
     mesurées au tableau plutôt qu'en toiture.
     """
+    def utilisable(pince):
+        return bool(pince) and pince.get("state") in ("enabled", "")
+
     idx = _meters_index()
-    prod, conso, net = (idx.get("production"), idx.get("total-consumption"),
-                        idx.get("net-consumption"))
-    if not (prod and conso and net):
-        return None
-    if any(m.get("state") not in ("enabled", "") for m in (prod, conso, net)):
-        return None  # une pince non activée renverrait des zéros crédibles
+    prod, net = idx.get("production"), idx.get("net-consumption")
+    if not (utilisable(prod) and utilisable(net)):
+        return None  # une pince absente ou désactivée renverrait des zéros crédibles
 
     readings = {
         r["eid"]: r for r in (_get_json("/ivp/meters/readings") or [])
         if isinstance(r, dict) and r.get("eid") is not None
     }
-    rp, rc, rn = (readings.get(prod["eid"]), readings.get(conso["eid"]),
-                  readings.get(net["eid"]))
-    if not (rp and rc and rn):
+    rp, rn = readings.get(prod["eid"]), readings.get(net["eid"])
+    if not (rp and rn):
         return None
 
     def f(reading, cle):
         return float(reading.get(cle) or 0)
 
     imp_life, exp_life = f(rn, "actEnergyDlvd"), f(rn, "actEnergyRcvd")
+    net_w, net_life = f(rn, "activePower"), imp_life - exp_life
+    prod_w, prod_life = f(rp, "activePower"), f(rp, "actEnergyDlvd")
+
+    # La pince de consommation totale est optionnelle : beaucoup
+    # d'installations n'en ont que deux (production + soutirage réseau). La
+    # consommation maison se déduit alors — ce qui est produit, plus ce qui
+    # est pris au réseau, moins ce qui y repart. C'est le même calcul que
+    # fait l'Envoy lui-même quand la troisième pince manque.
+    conso = idx.get("total-consumption")
+    rc = readings.get(conso["eid"]) if utilisable(conso) else None
+    if rc:
+        conso_w, conso_life = f(rc, "activePower"), f(rc, "actEnergyDlvd")
+    else:
+        conso_w, conso_life = prod_w + net_w, prod_life + net_life
+
     return {
-        "source": "meters",
-        "prod_w": f(rp, "activePower"),
-        "conso_w": f(rc, "activePower"),
-        "net_w": f(rn, "activePower"),
-        "prod_life": f(rp, "actEnergyDlvd"),
-        "conso_life": f(rc, "actEnergyDlvd"),
-        # net cumulé = ce qui est entré moins ce qui est ressorti
-        "net_life": imp_life - exp_life,
+        "source": "meters" if rc else "meters2",
+        "prod_w": prod_w,
+        "conso_w": conso_w,
+        "net_w": net_w,
+        "prod_life": prod_life,
+        "conso_life": conso_life,
+        "net_life": net_life,
         "imp_life": imp_life,
         "exp_life": exp_life,
     }
@@ -266,11 +279,14 @@ def get_energy():
     # sur l'autre donnerait une journée aberrante (souvent des mégawattheures).
     # Un changement de source repart donc sur une référence neuve, quitte à
     # perdre le début de la journée en cours.
+    # Un état sans source vient d'une version antérieure, où tout passait par
+    # production.json : il faut le traiter comme un changement, sinon les
+    # cumuls du jour se calculeraient contre une référence de l'autre source.
     source = m.get("source", "")
-    if state and state.get("source") not in (None, source):
+    if state and state.get("source") != source:
         journal(
-            f"Source des mesures : {state.get('source')} → {source}. "
-            f"Cumuls du jour repartis de zéro.", module=MODULE,
+            f"Source des mesures : {state.get('source') or 'production_json'} "
+            f"→ {source}. Cumuls du jour repartis de zéro.", module=MODULE,
         )
         state = None
 
