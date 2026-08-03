@@ -9,7 +9,7 @@
     <select name="module" class="form-select form-select-sm" style="width:auto">
       <option value="">Tous les modules</option>
       {% for m in modules %}
-        <option value="{{ m }}" {% if m == current_module %}selected{% endif %}>{{ m }}</option>
+        <option value="{{ m.nom }}" {% if m.nom == current_module %}selected{% endif %}>{{ m.libelle }}</option>
       {% endfor %}
     </select>
     <select name="level" class="form-select form-select-sm" style="width:auto">

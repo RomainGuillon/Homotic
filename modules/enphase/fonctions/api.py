@@ -335,9 +335,10 @@ def get_energy():
 # l'Envoy pendant quelques minutes. Sans ça, une passerelle injoignable fait
 # attendre chaque affichage du tableau de bord (3 requêtes × timeout) et
 # remplit le journal de milliers de lignes identiques.
-_CIRCUIT = {"echecs": 0, "rouvre_a": None}
+_CIRCUIT = {"echecs": 0, "rouvre_a": None, "dernier_log": None}
 CIRCUIT_SEUIL = 3          # échecs consécutifs avant ouverture
 CIRCUIT_PAUSE_MIN = 5      # minutes sans aucun appel une fois ouvert
+CIRCUIT_RAPPEL_MIN = 60    # rappel au journal tant que la panne dure
 
 # Un seul relevé Envoy à la fois. Le rendu d'une page appelle les fonctions
 # d'info les unes après les autres (production, conso, import, export...) et
@@ -355,30 +356,43 @@ def circuit_ouvert():
 
 def _circuit_succes():
     if _CIRCUIT["echecs"]:
-        journal("Envoy de nouveau joignable", module=MODULE)
-    _CIRCUIT["echecs"] = 0
-    _CIRCUIT["rouvre_a"] = None
+        journal(f"Envoy de nouveau joignable après {_CIRCUIT['echecs']} échecs",
+                module=MODULE)
+    _CIRCUIT.update({"echecs": 0, "rouvre_a": None, "dernier_log": None})
 
 
 def _circuit_echec(exc):
     """Compte l'échec et ne journalise que ce qui apprend quelque chose.
 
-    Les échecs suivants sont muets : mille fois « Read timed out » ne dit
-    rien de plus que la première fois, et noient le reste du journal.
+    Mille fois « Read timed out » ne dit rien de plus que la première fois et
+    noie le reste du journal. Mais se taire complètement serait pire : une
+    panne qui dure deviendrait indiscernable d'un fonctionnement normal. D'où
+    un rappel horaire, qui porte le compte des échecs accumulés.
     """
+    maintenant = datetime.now()
     _CIRCUIT["echecs"] += 1
     n = _CIRCUIT["echecs"]
+    dernier = _CIRCUIT["dernier_log"]
+
     if n < CIRCUIT_SEUIL:
         journal(f"Envoy injoignable ({n}/{CIRCUIT_SEUIL}) : {exc}",
                 module=MODULE, level=LogEntry.WARNING)
+        _CIRCUIT["dernier_log"] = maintenant
     elif n == CIRCUIT_SEUIL:
         journal(
             f"Envoy injoignable après {n} tentatives — appels suspendus "
-            f"{CIRCUIT_PAUSE_MIN} min : {exc}",
+            f"{CIRCUIT_PAUSE_MIN} min, rappel toutes les "
+            f"{CIRCUIT_RAPPEL_MIN} min : {exc}",
             module=MODULE, level=LogEntry.ERROR,
         )
+        _CIRCUIT["dernier_log"] = maintenant
+    elif dernier is None or maintenant - dernier >= timedelta(minutes=CIRCUIT_RAPPEL_MIN):
+        journal(f"Envoy toujours injoignable ({n} échecs) : {exc}",
+                module=MODULE, level=LogEntry.ERROR)
+        _CIRCUIT["dernier_log"] = maintenant
+
     if n >= CIRCUIT_SEUIL:
-        _CIRCUIT["rouvre_a"] = datetime.now() + timedelta(minutes=CIRCUIT_PAUSE_MIN)
+        _CIRCUIT["rouvre_a"] = maintenant + timedelta(minutes=CIRCUIT_PAUSE_MIN)
 
 
 def get_energy_cached(force=False, ttl_minutes=2):

@@ -363,6 +363,20 @@ class PurgeManuelleDuJournal(TestCase):
 
         self.assertEqual(LogEntry.objects.count(), 3)
 
+    def test_module_purge_reste_selectionnable(self):
+        """Le piège de la purge : le module disparaissait du filtre au moment
+        précis où l'on voulait vérifier s'il réécrivait."""
+        from core.models import LogEntry, Module
+
+        Module.objects.create(name="enphase", label="Énergie", enabled=True)
+        LogEntry.objects.all().delete()
+
+        reponse = self.client.get("/journal/")
+
+        noms = [m["nom"] for m in reponse.context["modules"]]
+        self.assertIn("enphase", noms)
+        self.assertContains(reponse, "enphase (Énergie)")
+
     def test_purge_refusee_en_get(self):
         from core.models import LogEntry
 

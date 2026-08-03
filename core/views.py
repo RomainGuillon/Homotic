@@ -327,9 +327,20 @@ def journal_view(request):
     if level:
         logs = logs.filter(level=level)
 
-    modules = (
-        LogEntry.objects.order_by("module").values_list("module", flat=True).distinct()
-    )
+    # Modules proposés au filtre : ceux qui ont écrit dans le journal, plus
+    # ceux qui sont installés. Se limiter aux premiers rendait un module
+    # invisible dès qu'on venait de purger ses lignes — soit exactement quand
+    # on cherche à savoir s'il en réécrit.
+    noms = set(LogEntry.objects.values_list("module", flat=True).distinct())
+    noms.update(Module.objects.filter(enabled=True).values_list("name", flat=True))
+    noms.add("core")
+    labels = dict(Module.objects.values_list("name", "label"))
+    modules = [
+        # « enphase (Énergie) » : le journal range sous le nom technique,
+        # mais c'est le nom de l'onglet qu'on a en tête en le cherchant.
+        {"nom": n, "libelle": f"{n} ({labels[n]})" if labels.get(n) else n}
+        for n in sorted(noms)
+    ]
 
     paginator = Paginator(logs, 50)
     page = paginator.get_page(request.GET.get("page"))
