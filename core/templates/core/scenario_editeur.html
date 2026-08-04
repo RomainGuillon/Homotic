@@ -423,9 +423,11 @@ function subActionButtons(boxId, depth) {
 
 function addSubCondition(boxId, type, data = {}) {
   document.getElementById(boxId).appendChild(makeRow(type, conditionInner(type, data)));
+  refreshEmpty();  // masque le lien ET/OU si c'est la première du bloc
 }
 function addSubAction(boxId, type, data = {}, depth = 1) {
   document.getElementById(boxId).appendChild(buildActionRow(type, data, depth + 1));
+  refreshEmpty();  // un Si/Boucle ajouté ici crée de nouveaux blocs de conditions
 }
 
 /* ---------- construction récursive des lignes d'action ---------- */
