@@ -521,3 +521,38 @@ class ParenthesageDesConditions(TestCase):
 
         ok, _ = check_conditions([{"type": "groupe", "conditions": []}])
         self.assertTrue(ok)
+
+    def test_le_groupe_passe_la_validation(self):
+        """Le moteur et la validation doivent connaître les mêmes types :
+        c'est l'oubli qui a fait échouer le premier enregistrement."""
+        from core.views_scenarios import _validate_conditions
+
+        conds = [
+            {"type": "switch", "controle": "a", "etat": "on"},
+            {
+                "type": "groupe",
+                "lien": "et",
+                "conditions": [
+                    {"type": "switch", "controle": "c", "etat": "on"},
+                    {"type": "switch", "controle": "d", "etat": "on", "lien": "ou"},
+                ],
+            },
+        ]
+        self.assertIsNone(_validate_conditions(conds))
+
+    def test_groupe_vide_refuse_a_l_enregistrement(self):
+        from core.views_scenarios import _validate_conditions
+
+        self.assertIsNotNone(
+            _validate_conditions([{"type": "groupe", "conditions": []}])
+        )
+
+    def test_groupe_dans_groupe_refuse(self):
+        from core.views_scenarios import _validate_conditions
+
+        conds = [{
+            "type": "groupe",
+            "conditions": [{"type": "groupe", "conditions": [
+                {"type": "switch", "controle": "a", "etat": "on"}]}],
+        }]
+        self.assertIsNotNone(_validate_conditions(conds))

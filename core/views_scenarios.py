@@ -69,10 +69,29 @@ def _validate_actions(actions, depth=0):
     return None
 
 
-def _validate_conditions(conditions):
-    """Vérifie les types et normalise le lien logique (et / ou)."""
+def _validate_conditions(conditions, dans_groupe=False):
+    """Vérifie les types et normalise le lien logique (et / ou).
+
+    ``dans_groupe`` interdit le groupe dans un groupe : un seul niveau de
+    parenthèses, comme le propose l'éditeur. Au-delà, l'expression devient
+    illisible pour un gain rare.
+    """
+    if not isinstance(conditions, list):
+        return "Conditions illisibles."
     for i, cond in enumerate(conditions):
-        if cond.get("type") not in CONDITION_TYPES:
+        ctype = cond.get("type")
+        if ctype == "groupe":
+            if dans_groupe:
+                return "Un groupe ne peut pas en contenir un autre."
+            sous = cond.get("conditions") or []
+            if not sous:
+                # Le moteur traite un groupe vide comme neutre, mais
+                # l'enregistrer serait presque sûrement un oubli.
+                return "Un groupe doit contenir au moins une condition."
+            err = _validate_conditions(sous, dans_groupe=True)
+            if err:
+                return err
+        elif ctype not in CONDITION_TYPES:
             return "Condition invalide."
         lien = str(cond.get("lien", "et")).lower()
         if i == 0:
