@@ -461,3 +461,63 @@ class AccesProtege(TestCase):
         reponse = self.client.get("/module/chauffe_eau/")
         self.assertEqual(reponse.status_code, 302)
         self.assertIn("/comptes/login/", reponse["Location"])
+
+
+class ParenthesageDesConditions(TestCase):
+    """« A ET B ET (C OU D) » doit rester faux si A ou B est faux.
+
+    Sans groupe, la liste plate se lit « (A ET B ET C) OU D » : D vrai à lui
+    seul déclenchait le scénario, en ignorant tout le reste. C'est le piège
+    que ces tests verrouillent — il ne se voit pas à la lecture de l'éditeur,
+    seulement le jour où le scénario part au mauvais moment.
+    """
+
+    def _switch(self, nom, allume):
+        from core.models import Control
+
+        Control.objects.create(name=nom, type=Control.SWITCH, is_on=allume)
+        return {"type": "switch", "controle": nom, "etat": "on"}
+
+    def _conditions(self, a, b, c, d):
+        """A ET B ET (C OU D)."""
+        cond_a = self._switch("a", a)
+        cond_b = self._switch("b", b)
+        cond_c = self._switch("c", c)
+        cond_d = self._switch("d", d)
+        cond_b["lien"] = "et"
+        return [
+            cond_a,
+            cond_b,
+            {
+                "type": "groupe",
+                "lien": "et",
+                "conditions": [cond_c, dict(cond_d, lien="ou")],
+            },
+        ]
+
+    def test_table_de_verite(self):
+        from core.scenarios_engine import check_conditions
+
+        cas = {
+            # (A, B, C, D): résultat attendu
+            (True, True, True, False): True,
+            (True, True, False, True): True,
+            (True, True, True, True): True,
+            (True, True, False, False): False,
+            (False, True, True, True): False,   # le piège : D vrai ne suffit pas
+            (True, False, False, True): False,
+        }
+        for (a, b, c, d), attendu in cas.items():
+            with self.subTest(a=a, b=b, c=c, d=d):
+                from core.models import Control
+
+                Control.objects.all().delete()
+                ok, _ = check_conditions(self._conditions(a, b, c, d))
+                self.assertEqual(ok, attendu)
+
+    def test_groupe_vide_est_neutre(self):
+        """Un groupe qu'on vient d'ajouter ne doit pas bloquer le scénario."""
+        from core.scenarios_engine import check_conditions
+
+        ok, _ = check_conditions([{"type": "groupe", "conditions": []}])
+        self.assertTrue(ok)

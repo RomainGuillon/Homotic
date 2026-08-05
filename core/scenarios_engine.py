@@ -225,6 +225,18 @@ def _check_condition(cond):
             return False, f"hors plage {cond.get('debut')}-{cond.get('fin')}"
         return True, ""
 
+    if ctype == "groupe":
+        # Parenthésage : le groupe est évalué à part puis vu comme une
+        # condition unique par la liste qui le contient. C'est ce qui permet
+        # « A ET B ET (C OU D) », impossible avec une liste plate.
+        sous = cond.get("conditions") or []
+        if not sous:
+            return True, ""  # groupe vide = neutre, comme une liste vide
+        ok, why = check_conditions(sous)
+        if not ok:
+            return False, f"groupe : {why}"
+        return True, ""
+
     return False, f"condition inconnue « {ctype} »"
 
 
@@ -234,31 +246,35 @@ def check_conditions(conditions):
     Chaque condition à partir de la deuxième porte un lien (``lien`` :
     « et » par défaut, ou « ou »). Le ET est prioritaire sur le OU, comme en
     algèbre booléenne : « A et B ou C et D » se lit « (A et B) ou (C et D) ».
-    On découpe donc la liste en groupes à chaque « ou » ; un groupe est vrai
-    si toutes ses conditions le sont, et l'ensemble est vrai si au moins un
-    groupe l'est.
+    On découpe donc la liste en branches à chaque « ou » ; une branche est
+    vraie si toutes ses conditions le sont, et l'ensemble est vrai si au moins
+    une branche l'est.
+
+    Pour aller au-delà de cette priorité fixe, une condition de type
+    ``groupe`` porte sa propre liste de conditions et vaut pour une seule
+    condition ici : « A ET B ET (C OU D) » s'écrit A, B, groupe(C OU D).
 
     Retourne (ok, explication du refus).
     """
     if not conditions:
         return True, ""
 
-    groupes = [[]]
+    branches = [[]]
     for i, cond in enumerate(conditions):
         if i and str(cond.get("lien", "et")).lower() == "ou":
-            groupes.append([])
-        groupes[-1].append(cond)
+            branches.append([])
+        branches[-1].append(cond)
 
     raisons = []
-    for groupe in groupes:
+    for branche in branches:
         echec = ""
-        for cond in groupe:
+        for cond in branche:
             ok, why = _check_condition(cond)
             if not ok:
                 echec = why
                 break
         if not echec:
-            return True, ""  # ce groupe suffit
+            return True, ""  # cette branche suffit
         raisons.append(echec)
 
     if len(raisons) == 1:

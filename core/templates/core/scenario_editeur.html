@@ -141,6 +141,8 @@
           <i class="bi bi-plus"></i> Variable</button>
         <button type="button" class="btn btn-sm btn-outline-primary" onclick="addCondition('info')">
           <i class="bi bi-plus"></i> Info d'un module</button>
+        <button type="button" class="btn btn-sm btn-outline-warning" onclick="addCondition('groupe')">
+          <i class="bi bi-plus"></i> Groupe ( )</button>
       </span>
     </div>
     <div class="card-body" id="conditions-list">
@@ -149,6 +151,9 @@
     <div class="card-footer small text-secondary">
       Le <strong>ET</strong> est prioritaire sur le <strong>OU</strong> :
       « A ET B OU C ET D » se lit « (A ET B) OU (C ET D) ».
+      Pour forcer un autre découpage, utilisez un <strong>groupe</strong> : il compte
+      pour une seule condition, donc « A ET B ET (C OU D) » s'écrit A, B, puis un
+      groupe contenant C OU D.
       Les flèches ↑ ↓ déplacent une ligne dans son bloc.
     </div>
   </div>
@@ -253,7 +258,7 @@ function refreshEmpty() {
 }
 /* La première condition d'un bloc n'a pas de lien : rien avant elle. */
 function refreshLiens() {
-  document.querySelectorAll('#conditions-list, [data-si="conditions"], [data-b="conditions"], [data-b="sortie"]')
+  document.querySelectorAll('#conditions-list, [data-si="conditions"], [data-b="conditions"], [data-b="sortie"], [data-groupe="conditions"]')
     .forEach(box => {
       Array.from(box.children).filter(el => el.dataset.type).forEach((row, i) => {
         const sel = row.querySelector(':scope > [data-lien]');
@@ -397,13 +402,19 @@ function actionInner(type, data = {}) {
 }
 
 /* ---------- boutons des sous-listes ---------- */
-function subCondButtons(boxId) {
-  return `<span>
+/* avecGroupe : faux à l'intérieur d'un groupe — un seul niveau de
+   parenthèses, au-delà l'imbrication devient illisible et sert rarement. */
+function subCondButtons(boxId, avecGroupe = true) {
+  let html = `<span>
     <button type="button" class="btn btn-sm btn-outline-info py-0" onclick="addSubCondition('${boxId}','switch')">+ switch</button>
     <button type="button" class="btn btn-sm btn-outline-info py-0" onclick="addSubCondition('${boxId}','plage')">+ plage</button>
     <button type="button" class="btn btn-sm btn-outline-info py-0" onclick="addSubCondition('${boxId}','variable')">+ variable</button>
-    <button type="button" class="btn btn-sm btn-outline-info py-0" onclick="addSubCondition('${boxId}','info')">+ info</button>
-  </span>`;
+    <button type="button" class="btn btn-sm btn-outline-info py-0" onclick="addSubCondition('${boxId}','info')">+ info</button>`;
+  if (avecGroupe) {
+    html += `
+    <button type="button" class="btn btn-sm btn-outline-warning py-0" onclick="addSubCondition('${boxId}','groupe')">+ groupe ( )</button>`;
+  }
+  return html + '</span>';
 }
 function subActionButtons(boxId, depth) {
   let html = `<span>
@@ -421,8 +432,32 @@ function subActionButtons(boxId, depth) {
   return html + '</span>';
 }
 
+/* ---------- construction d'une ligne de condition ---------- */
+/* Le groupe est la seule condition qui en contient d'autres : il vaut pour
+   une condition unique dans la liste qui le porte, ce qui donne les
+   parenthèses de « A ET B ET (C OU D) ». */
+function buildConditionRow(type, data = {}) {
+  if (type !== 'groupe') return makeRow(type, conditionInner(type, data));
+
+  const box = `grp-cond-${++uid}`;
+  const inner = lienSelect(data) + `
+    <div class="w-100">
+      <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+        <span class="badge text-bg-warning">Groupe ( )</span>
+        <span class="small text-secondary">vrai si les conditions ci-dessous le sont — liens ET / OU internes</span>
+        ${subCondButtons(box, false)}
+      </div>
+      <div id="${box}" data-groupe="conditions" class="ms-4"></div>
+    </div>`;
+  const row = makeRow('groupe', inner,
+    'border border-warning rounded p-2 mb-2 d-flex gap-2 align-items-start');
+  const cible = row.querySelector(`#${box}`);
+  (data.conditions || []).forEach(c => cible.appendChild(buildConditionRow(c.type, c)));
+  return row;
+}
+
 function addSubCondition(boxId, type, data = {}) {
-  document.getElementById(boxId).appendChild(makeRow(type, conditionInner(type, data)));
+  document.getElementById(boxId).appendChild(buildConditionRow(type, data));
   refreshEmpty();  // masque le lien ET/OU si c'est la première du bloc
 }
 function addSubAction(boxId, type, data = {}, depth = 1) {
@@ -511,7 +546,7 @@ function buildActionRow(type, data = {}, depth = 1) {
 
 /* Ajouts dans un row pas encore inséré dans le DOM (initialisation) */
 function addSubConditionTo(row, boxId, data) {
-  row.querySelector(`#${boxId}`).appendChild(makeRow(data.type, conditionInner(data.type, data)));
+  row.querySelector(`#${boxId}`).appendChild(buildConditionRow(data.type, data));
 }
 function addSubActionTo(row, boxId, data, depth) {
   row.querySelector(`#${boxId}`).appendChild(buildActionRow(data.type, data, depth + 1));
@@ -519,7 +554,7 @@ function addSubActionTo(row, boxId, data, depth) {
 
 /* ---------- haut niveau ---------- */
 function addCondition(type, data = {}) {
-  document.getElementById('conditions-list').appendChild(makeRow(type, conditionInner(type, data)));
+  document.getElementById('conditions-list').appendChild(buildConditionRow(type, data));
   refreshEmpty();
 }
 function addAction(type, data = {}) {
@@ -537,6 +572,14 @@ function resolveIdx(item, field, list) {
 }
 function collectRow(r) {
   const item = { type: r.dataset.type };
+  if (item.type === 'groupe') {
+    // Le lien du groupe est un enfant direct, comme sur une condition simple ;
+    // ses sous-conditions vivent dans le conteneur indenté.
+    const sel = r.querySelector(':scope > [data-field="lien"]');
+    if (sel) item.lien = sel.value;
+    item.conditions = collectContainer(r.querySelector(':scope > .w-100 > [data-groupe="conditions"]'));
+    return item;
+  }
   if (item.type === 'si') {
     item.conditions = collectContainer(r.querySelector(':scope > .w-100 > [data-si="conditions"]'));
     item.alors = collectContainer(r.querySelector(':scope > .w-100 > [data-si="alors"]'));
