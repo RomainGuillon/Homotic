@@ -1,0 +1,1 @@
+"""Onglet du module Alarme."""

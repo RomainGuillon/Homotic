@@ -1,0 +1,214 @@
+{% extends "core/base.html" %}
+{% block title %}Alarme — Homotic{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-1">
+  <h1 class="h4 mb-0">Alarme</h1>
+  {% if configure %}
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="refresh">
+      <button class="btn btn-sm btn-outline-light rounded-pill px-3" title="Relire l'état chez Verisure">
+        <i class="bi bi-arrow-clockwise me-1"></i>Actualiser
+      </button>
+    </form>
+  {% endif %}
+</div>
+<p class="text-secondary small mb-4">État de l'alarme Verisure — lecture seule
+  {% if ts %}<span class="ms-2">· lu le {{ ts|date:"d/m H:i" }}</span>{% endif %}</p>
+
+{% if not configure %}
+  <div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle me-2"></i>Module non configuré :
+    renseigner l'identifiant et le mot de passe Verisure dans le paramétrage ci-dessous.
+  </div>
+{% elif erreur %}
+  <div class="alert alert-warning"><i class="bi bi-wifi-off me-2"></i>{{ erreur }}</div>
+{% endif %}
+
+{% if etat %}
+  <div class="row g-4 mb-4">
+    <div class="col-12 col-md-6 col-xl-4">
+      <div class="card h-100">
+        <div class="card-header d-flex align-items-center justify-content-between">
+          <span><i class="bi bi-shield-lock me-2"></i>{{ etat.alias }}</span>
+          <span class="badge rounded-pill {{ etat.badge }}">{{ etat.libelle }}</span>
+        </div>
+        <div class="card-body d-flex justify-content-center">{{ etat.svg|safe }}</div>
+      </div>
+    </div>
+
+    <div class="col-12 col-md-6 col-xl-4">
+      <div class="card h-100">
+        <div class="card-header"><i class="bi bi-info-circle me-2"></i>Détail</div>
+        <div class="card-body">
+          <div class="d-flex justify-content-between border-bottom py-1">
+            <span class="text-secondary">Code protocole</span><span><code>{{ etat.code }}</code></span>
+          </div>
+          <div class="d-flex justify-content-between border-bottom py-1">
+            <span class="text-secondary">Dernier changement</span>
+            <span>{% if etat.change_le %}{{ etat.change_le|slice:":16"|cut:"T" }}{% else %}—{% endif %}</span>
+          </div>
+          <div class="d-flex justify-content-between border-bottom py-1">
+            <span class="text-secondary">Centrale en ligne</span>
+            <span>{% if etat.wifi %}<span class="text-success">oui</span>{% else %}<span class="text-danger">non</span>{% endif %}</span>
+          </div>
+          <div class="d-flex justify-content-between py-1">
+            <span class="text-secondary">Anomalies</span>
+            <span>{{ etat.anomalies|length }}</span>
+          </div>
+          {% for a in etat.anomalies %}
+            <div class="small text-warning mt-2">
+              <i class="bi bi-exclamation-triangle me-1"></i>{{ a.alias }} ({{ a.type }}) : {{ a.statut }}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+{# ---------- Paramétrage ---------- #}
+<div class="accordion" id="accordionParams">
+  <div class="accordion-item">
+    <h2 class="accordion-header">
+      <button class="accordion-button {% if configure and valide %}collapsed{% endif %}" type="button"
+              data-bs-toggle="collapse" data-bs-target="#collapseParams">
+        <i class="bi bi-gear me-2"></i>Paramétrage — compte Verisure
+      </button>
+    </h2>
+    <div id="collapseParams" class="accordion-collapse collapse {% if not configure or not valide %}show{% endif %}"
+         data-bs-parent="#accordionParams">
+      <div class="accordion-body">
+
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="params">
+          <div class="row g-3 mb-3">
+            <div class="col-12 col-md-4">
+              <label class="form-label">Identifiant</label>
+              <input type="text" name="identifiant" class="form-control" value="{{ params.identifiant }}">
+              <div class="form-text">En France, un nom d'utilisateur, pas une adresse e-mail.</div>
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Mot de passe</label>
+              <input type="password" name="mot_de_passe" class="form-control" autocomplete="new-password"
+                     placeholder="{% if params.a_mot_de_passe %}•••••• (laisser vide pour conserver){% else %}à renseigner{% endif %}">
+              <div class="form-text">Trois erreurs de suite bloquent le compte chez Verisure.</div>
+            </div>
+            <div class="col-6 col-md-2">
+              <label class="form-label">Pays</label>
+              <select name="pays" class="form-select">
+                {% for p in params.pays_possibles %}
+                  <option value="{{ p }}" {% if params.pays == p %}selected{% endif %}>{{ p }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-6 col-md-2">
+              <label class="form-label">Relire toutes les… (min)</label>
+              <input type="number" name="tache_actualiser_minutes" class="form-control" min="0" value="{{ params.minutes }}">
+              <div class="form-text">Verisure bloque les lectures trop rapprochées.
+                <strong>3 minutes</strong> est le réglage sûr ; <strong>0 = jamais</strong>.
+                Pris en compte au prochain démarrage.</div>
+            </div>
+          </div>
+          <button class="btn btn-primary">Enregistrer</button>
+        </form>
+
+        <hr class="my-4">
+
+        {# ---------- Validation de l'appareil (2FA) ---------- #}
+        <h3 class="h6 mb-2"><i class="bi bi-phone me-2"></i>Validation de l'appareil</h3>
+        <p class="text-secondary small">
+          Verisure exige qu'un nouvel appareil soit validé une fois par SMS. Ensuite,
+          Homotic se connecte seul — sauf si tu changes de compte ou réinitialises ci-dessous.
+        </p>
+
+        {% if not configure %}
+          <p class="text-secondary small mb-0">Renseigner d'abord l'identifiant et le mot de passe.</p>
+
+        {% elif etape_2fa == "numero" %}
+          <form method="post" class="mb-2">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="2fa_sms">
+            <label class="form-label">Numéro qui recevra le code</label>
+            {% for id, numero in telephones %}
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="telephone" id="tel{{ id }}"
+                       value="{{ id }}" {% if forloop.first %}checked{% endif %}>
+                <label class="form-check-label" for="tel{{ id }}">{{ numero }}</label>
+              </div>
+            {% endfor %}
+            <button class="btn btn-primary btn-sm mt-2">Envoyer le SMS</button>
+          </form>
+
+        {% elif etape_2fa == "code" %}
+          <form method="post" class="row g-2 align-items-end mb-2">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="2fa_code">
+            <div class="col-12 col-md-3">
+              <label class="form-label">Code reçu par SMS</label>
+              <input type="text" name="code" class="form-control" inputmode="numeric" autocomplete="one-time-code">
+            </div>
+            <div class="col-auto">
+              <button class="btn btn-primary">Valider</button>
+            </div>
+          </form>
+          <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="2fa_defi">
+            <button class="btn btn-link btn-sm p-0">Recommencer (nouveau code)</button>
+          </form>
+
+        {% else %}
+          <div class="d-flex align-items-center gap-3 flex-wrap">
+            {% if valide %}
+              <span class="badge rounded-pill text-bg-success">Appareil validé</span>
+            {% else %}
+              <span class="badge rounded-pill text-bg-secondary">Appareil non validé</span>
+            {% endif %}
+            <form method="post" class="d-inline">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="2fa_defi">
+              <button class="btn btn-outline-light btn-sm">
+                {% if valide %}Revalider par SMS{% else %}Valider par SMS{% endif %}
+              </button>
+            </form>
+            <form method="post" class="d-inline">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="reset">
+              <button class="btn btn-outline-danger btn-sm">Oublier cet appareil</button>
+            </form>
+          </div>
+        {% endif %}
+
+        {# ---------- Installation et droits ---------- #}
+        {% if params.numinst %}
+          <hr class="my-4">
+          <h3 class="h6 mb-2"><i class="bi bi-house me-2"></i>Installation</h3>
+          <div class="small text-secondary mb-2">
+            {{ params.alias }} · n° {{ params.numinst }} · centrale {{ params.panel }}
+            {% if params.role %} · rôle {{ params.role }}{% endif %}
+          </div>
+          {% if capacites %}
+            <p class="small text-secondary mb-1">Droits de ce compte chez Verisure :</p>
+            <p class="small mb-2">
+              {% for c in capacites %}<span class="badge text-bg-dark me-1 mb-1">{{ c }}</span>{% endfor %}
+            </p>
+            {% if peut_desarmer %}
+              <div class="alert alert-warning small mb-0">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                Ce compte porte le droit <code>DARM</code> : il peut désarmer l'alarme.
+                Homotic ne le fera jamais — aucune fonction d'armement n'existe dans le
+                module — mais un compte à droits réduits limiterait la casse si les
+                identifiants fuitaient.
+              </div>
+            {% endif %}
+          {% endif %}
+        {% endif %}
+
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
