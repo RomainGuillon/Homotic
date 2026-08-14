@@ -27,7 +27,8 @@ def bloc(request):
             "stale": bool(erreur) and etat is not None,
             "etat": etat,
             "ts": ts,
-            "svg": affichage.bouclier_svg(etat["cle"], etat["libelle"], width=120) if etat else "",
+            "svg": affichage.bouclier_svg(etat["cle"], width=110) if etat else "",
             "badge": affichage.badge_classe(etat["cle"]) if etat else "",
+            "change_le_texte": affichage.date_courte(etat.get("change_le")) if etat else "",
         },
     )

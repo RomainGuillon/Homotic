@@ -47,7 +47,7 @@
           </div>
           <div class="d-flex justify-content-between border-bottom py-1">
             <span class="text-secondary">Dernier changement</span>
-            <span>{% if etat.change_le %}{{ etat.change_le|slice:":16"|cut:"T" }}{% else %}—{% endif %}</span>
+            <span>{% if etat.change_le_texte %}{{ etat.change_le_texte }}{% else %}—{% endif %}</span>
           </div>
           <div class="d-flex justify-content-between border-bottom py-1">
             <span class="text-secondary">Centrale en ligne</span>

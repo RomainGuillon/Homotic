@@ -12,8 +12,8 @@
     <div>{{ svg|safe }}</div>
     <div>
       <div class="mb-1"><span class="badge rounded-pill {{ badge }}">{{ etat.libelle }}</span></div>
-      {% if etat.change_le %}
-        <div class="small text-secondary">depuis le {{ etat.change_le|slice:":16"|cut:"T" }}</div>
+      {% if change_le_texte %}
+        <div class="small text-secondary">depuis le {{ change_le_texte }}</div>
       {% endif %}
       {% if not etat.wifi %}
         <div class="small text-danger mt-1"><i class="bi bi-wifi-off me-1"></i>Centrale hors ligne</div>

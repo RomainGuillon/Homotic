@@ -128,8 +128,10 @@ def onglet(request):
     if etat:
         carte = {
             **etat,
-            "svg": affichage.bouclier_svg(etat["cle"], etat["libelle"]),
+            # Pas de libellé dans le bouclier : le badge du bandeau le dit déjà.
+            "svg": affichage.bouclier_svg(etat["cle"]),
             "badge": affichage.badge_classe(etat["cle"]),
+            "change_le_texte": affichage.date_courte(etat.get("change_le")),
         }
 
     return render(
