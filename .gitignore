@@ -21,6 +21,11 @@ staticfiles/
 modules/*/cache/
 *.token
 
+# Session Arlo (pyaarlo). Doit survivre aux redemarrages, sinon Arlo redemande
+# un code a deux facteurs a chaque relance du service — mais elle contient un
+# jeton d'acces au compte, donc jamais dans le depot.
+.arlo/
+
 # Artefacts de montage reseau (SMB) et d'editeurs
 .fuse_hidden*
 .DS_Store

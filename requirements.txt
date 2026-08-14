@@ -5,3 +5,9 @@ django>=5.1
 requests>=2.31
 apscheduler>=3.10
 pyoverkiz>=1.13
+
+# Module Caméras : acces non officiel a l'API Arlo. Les modes de la nouvelle
+# experience Arlo (v3) passent par l'objet « location » ; la 0.8.0.15 ne
+# sait pas les lire, d'ou la borne. La bibliotheque bouge avec le backend
+# d'Arlo : verifier ce module apres chaque montee de version.
+pyaarlo>=0.8.0.22

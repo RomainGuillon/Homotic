@@ -1,0 +1,1 @@
+"""Fonctions du module Caméras."""

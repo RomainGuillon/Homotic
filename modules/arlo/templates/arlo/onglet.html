@@ -1,0 +1,246 @@
+{% extends "core/base.html" %}
+{% block title %}Caméras — Homotic{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-1">
+  <h1 class="h4 mb-0">Caméras</h1>
+  {% if connecte %}
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="refresh">
+      <button class="btn btn-sm btn-outline-light rounded-pill px-3">
+        <i class="bi bi-arrow-clockwise me-1"></i>Actualiser
+      </button>
+    </form>
+  {% endif %}
+</div>
+<p class="text-secondary small mb-4">Mode de surveillance Arlo
+  {% if ts %}<span class="ms-2">· lu le {{ ts|date:"d/m H:i" }}</span>{% endif %}</p>
+
+{# ---------- État de la connexion ---------- #}
+{% if not configure %}
+  <div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle me-2"></i>Module non configuré :
+    renseigner le compte Arlo dans le paramétrage ci-dessous.
+  </div>
+
+{% elif attente_code %}
+  <div class="alert alert-info">
+    <p class="mb-2"><i class="bi bi-envelope me-2"></i>{{ message_connexion }}</p>
+    <form method="post" class="row g-2 align-items-end">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="code">
+      <div class="col-12 col-md-3">
+        <label class="form-label">Code reçu par e-mail</label>
+        <input type="text" name="code" class="form-control" inputmode="numeric"
+               autocomplete="one-time-code" autofocus>
+      </div>
+      <div class="col-auto"><button class="btn btn-primary">Valider</button></div>
+    </form>
+  </div>
+
+{% elif connexion == "en_cours" %}
+  <div class="alert alert-info">
+    <i class="bi bi-hourglass-split me-2"></i>Connexion en cours… rafraîchir la page dans quelques secondes.
+  </div>
+
+{% elif connexion == "erreur" %}
+  <div class="alert alert-danger d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span><i class="bi bi-x-circle me-2"></i>{{ message_connexion }}</span>
+    <form method="post" class="mb-0">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="connexion">
+      <button class="btn btn-sm btn-light">Réessayer</button>
+    </form>
+  </div>
+
+{% elif not connecte %}
+  <div class="alert alert-warning d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span><i class="bi bi-plug me-2"></i>Pas connecté à Arlo.</span>
+    <form method="post" class="mb-0">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="connexion">
+      <button class="btn btn-sm btn-light">Se connecter</button>
+    </form>
+  </div>
+{% endif %}
+
+{% if erreur and connecte %}
+  <div class="alert alert-warning"><i class="bi bi-wifi-off me-2"></i>{{ erreur }}</div>
+{% endif %}
+
+{% if etat %}
+  <div class="row g-4 mb-4">
+    {# ---------- Mode ---------- #}
+    <div class="col-12 col-md-6 col-xl-5">
+      <div class="card h-100">
+        <div class="card-header d-flex align-items-center justify-content-between">
+          <span><i class="bi bi-camera-video me-2"></i>Mode de surveillance</span>
+          <span class="badge rounded-pill {{ badge }}">{{ etat.libelle }}</span>
+        </div>
+        <div class="card-body">
+          <div class="d-grid gap-2">
+            {% for m in modes %}
+              <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="mode">
+                <input type="hidden" name="code_mode" value="{{ m.code }}">
+                <button class="btn w-100 {% if m.actif %}btn-primary{% else %}btn-outline-light{% endif %}"
+                        {% if m.actif %}disabled{% endif %}>
+                  <i class="bi bi-{{ m.icone }} me-2"></i>{{ m.libelle }}
+                  {% if m.actif %}<span class="ms-2 small">— actuel</span>{% endif %}
+                </button>
+              </form>
+            {% endfor %}
+          </div>
+          <p class="form-text mt-3 mb-0">Emplacement Arlo : {{ etat.emplacement }}</p>
+        </div>
+      </div>
+    </div>
+
+    {# ---------- Caméras ---------- #}
+    {% for cam in cameras %}
+      <div class="col-12 col-md-6 col-xl-7">
+        <div class="card h-100">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <span>{{ cam.nom }} <span class="text-secondary small">({{ cam.modele }})</span></span>
+            <span class="small">
+              <i class="bi bi-battery-half me-1 {{ cam.classe_batterie }}"></i>
+              <span class="{{ cam.classe_batterie }}">{{ cam.batterie }} %</span>
+              <span class="text-secondary ms-2">signal {{ cam.signal }}/4</span>
+            </span>
+          </div>
+          <div class="card-body">
+            {% if cam.image %}
+              <img src="{{ cam.image }}" alt="Dernière image de {{ cam.nom }}"
+                   class="img-fluid rounded mb-3" style="width:100%">
+            {% else %}
+              <p class="text-secondary">Aucune image disponible.</p>
+            {% endif %}
+            <div class="d-flex align-items-center gap-3 flex-wrap">
+              <form method="post" class="mb-0">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="photo">
+                <button class="btn btn-outline-light btn-sm" {% if photo_en_cours %}disabled{% endif %}>
+                  <i class="bi bi-camera me-1"></i>
+                  {% if photo_en_cours %}Instantané en cours…{% else %}Prendre une photo maintenant{% endif %}
+                </button>
+              </form>
+              <span class="text-secondary small">état : {{ cam.etat }}</span>
+            </div>
+            {% if photo_en_cours %}
+              <p class="form-text mb-0">La caméra se réveille — rafraîchir la page dans une trentaine de secondes.</p>
+            {% endif %}
+            <p class="form-text mb-0">Le direct n'est pas affichable ici : Arlo ne fournit
+              qu'un flux RTSPS, qu'aucun navigateur ne sait lire.</p>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{# ---------- Paramétrage ---------- #}
+<div class="accordion" id="accordionParams">
+  <div class="accordion-item">
+    <h2 class="accordion-header">
+      <button class="accordion-button {% if connecte %}collapsed{% endif %}" type="button"
+              data-bs-toggle="collapse" data-bs-target="#collapseParams">
+        <i class="bi bi-gear me-2"></i>Paramétrage — compte Arlo
+      </button>
+    </h2>
+    <div id="collapseParams" class="accordion-collapse collapse {% if not connecte %}show{% endif %}"
+         data-bs-parent="#accordionParams">
+      <div class="accordion-body">
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="params">
+          <div class="row g-3 mb-3">
+            <div class="col-12 col-md-4">
+              <label class="form-label">Identifiant (e-mail)</label>
+              <input type="email" name="identifiant" class="form-control" value="{{ params.identifiant }}">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Mot de passe</label>
+              <input type="password" name="mot_de_passe" class="form-control" autocomplete="new-password"
+                     placeholder="{% if params.a_mot_de_passe %}•••••• (laisser vide pour conserver){% else %}à renseigner{% endif %}">
+            </div>
+            <div class="col-6 col-md-2">
+              <label class="form-label">Relire toutes les… (min)</label>
+              <input type="number" name="tache_actualiser_minutes" class="form-control" min="0"
+                     value="{{ params.minutes }}">
+              <div class="form-text">Relance aussi la connexion si elle est perdue. <strong>0 = jamais</strong>.</div>
+            </div>
+          </div>
+
+          <h3 class="h6 mb-2">Code à deux facteurs</h3>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="source_2fa" id="src_onglet" value="onglet"
+                   {% if params.source_2fa == "onglet" %}checked{% endif %}>
+            <label class="form-check-label" for="src_onglet">
+              <strong>Le saisir ici</strong> — Homotic te demande le code dans cet onglet.
+              Simple, mais il faut être là : si le jeton expire pendant une absence,
+              les scénarios cessent d'agir jusqu'à ton retour.
+            </label>
+          </div>
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="radio" name="source_2fa" id="src_imap" value="imap"
+                   {% if params.source_2fa == "imap" %}checked{% endif %}>
+            <label class="form-check-label" for="src_imap">
+              <strong>Le lire dans une boîte mail (IMAP)</strong> — Homotic va chercher le code
+              tout seul. Autonome, mais les identifiants de la boîte sont enregistrés en base.
+              Utiliser un mot de passe d'application, jamais le mot de passe principal.
+            </label>
+          </div>
+
+          <div class="row g-3 mb-3">
+            <div class="col-12 col-md-4">
+              <label class="form-label">Serveur IMAP</label>
+              <input type="text" name="imap_hote" class="form-control" value="{{ params.imap_hote }}"
+                     placeholder="imap.mail.me.com">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Utilisateur IMAP</label>
+              <input type="text" name="imap_utilisateur" class="form-control"
+                     value="{{ params.imap_utilisateur }}">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Mot de passe IMAP</label>
+              <input type="password" name="imap_mot_de_passe" class="form-control" autocomplete="new-password"
+                     placeholder="{% if params.a_imap_mot_de_passe %}•••••• (laisser vide pour conserver){% else %}mot de passe d'application{% endif %}">
+            </div>
+          </div>
+
+          <button class="btn btn-primary">Enregistrer</button>
+        </form>
+
+        <hr class="my-4">
+        <h3 class="h6 mb-2"><i class="bi bi-plug me-2"></i>Connexion</h3>
+        <p class="text-secondary small">
+          Session enregistrée dans <code>{{ params.repertoire }}</code>. Elle survit aux
+          redémarrages : sans elle, Arlo redemanderait un code à chaque relance du service.
+        </p>
+        <div class="d-flex gap-2 flex-wrap">
+          <form method="post" class="mb-0">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="connexion">
+            <button class="btn btn-outline-light btn-sm">Se connecter</button>
+          </form>
+          {% if connecte %}
+            <form method="post" class="mb-0">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="deconnexion">
+              <button class="btn btn-outline-light btn-sm">Se déconnecter</button>
+            </form>
+          {% endif %}
+          <form method="post" class="mb-0">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="oublier">
+            <button class="btn btn-outline-danger btn-sm">Oublier la session</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
