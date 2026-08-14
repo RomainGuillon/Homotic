@@ -11,46 +11,56 @@
   <style>
     body { min-height: 100vh; }
 
-    /* Barre de navigation en trois colonnes : les deux latérales font « 1fr »
-       — donc exactement la même largeur quel que soit leur contenu — et les
-       onglets prennent « auto » au centre.
+    /* Barre de navigation en deux lignes fixes.
 
-       Un grid plutôt qu'un flex : « flex-fill » vaut flex:1 1 auto, si bien
-       que chaque côté conserve la largeur de son contenu avant de partager
-       l'espace restant. Les onglets se décalaient donc d'une page à l'autre
-       selon les boutons d'actions. Pire, sur le tableau de bord la zone
-       d'actions passait à la ligne et la marque absorbait tout l'espace. */
+       Ligne 1 : la marque à gauche, les onglets centrés dans la place qui
+       reste à côté d'elle — d'où la grille « auto 1fr », la colonne des
+       onglets occupant tout le reste et les centrant en son sein.
+
+       Ligne 2 : les icônes d'action (rafraîchir, organiser, à propos,
+       déconnexion…). Elle existe sur toutes les pages, même quand elle ne
+       porte que deux boutons : c'est ce qui garantit que la ligne des
+       onglets est rigoureusement la même partout. Les mêler aux onglets, sur
+       une seule ligne, faisait bouger ces derniers d'une page à l'autre
+       selon les boutons présents. */
     .barre-nav {
+      display: flex;
+      flex-direction: column;
+      gap: .35rem;
+      width: 100%;
+    }
+    .barre-onglets {
       display: grid;
-      grid-template-columns: 1fr auto 1fr;
+      grid-template-columns: auto 1fr;
       align-items: center;
       gap: .5rem;
     }
-    .barre-nav > * { min-width: 0; }
+    .barre-onglets > * { min-width: 0; }
+    .barre-onglets .nav { flex-wrap: wrap; justify-content: center; }
+    .zone-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: .5rem;
+      row-gap: .25rem;
+    }
 
-    /* Les actions passent à la ligne dans leur propre colonne plutôt que de
-       déborder sur les onglets : entre 1200 et 1700 px, les boutons du
-       tableau de bord ne tiennent pas sur une seule ligne. La barre grandit
-       en hauteur, les onglets ne bougent pas d'un pixel. */
-    .barre-nav .zone-actions { flex-wrap: wrap; row-gap: .25rem; }
-
-    /* En dessous de ~1700 px, les douze onglets laissent trop peu de place
-       aux colonnes latérales : les actions s'empilent alors sur quatre
-       lignes, ce qui est laid. On passe en colonne unique centrée, plus
-       lisible. Seuil à ajuster si le nombre d'onglets change beaucoup. */
-    @media (max-width: 1699.98px) {
-      .barre-nav { grid-template-columns: 1fr; justify-items: center; }
-      .barre-nav .zone-actions { justify-content: center; }
+    /* Écrans étroits : la marque passe au-dessus des onglets plutôt que de
+       les comprimer, et les actions se centrent. */
+    @media (max-width: 991.98px) {
+      .barre-onglets { grid-template-columns: 1fr; justify-items: center; }
+      .zone-actions { justify-content: center; }
     }
   </style>
 </head>
 <body>
-  {% comment %} Trois colonnes de grille : les latérales en « 1fr » sont
-     rigoureusement égales, les onglets restent donc au centre exact quels que
-     soient les boutons d'actions de la page. Voir la règle .barre-nav
-     ci-dessus pour pourquoi ce n'est pas un flex. {% endcomment %}
+  {% comment %} Deux lignes : les onglets seuls en haut, les icônes d'action
+     en dessous. Voir les règles .barre-nav / .barre-onglets ci-dessus.
+     {% endcomment %}
   <nav class="navbar bg-body-tertiary border-bottom mb-4">
     <div class="container-fluid barre-nav">
+     <div class="barre-onglets">
       <span class="navbar-brand d-flex align-items-center gap-2 m-0">
         <span style="width:30px;height:30px;border-radius:var(--r-md);
                      background:linear-gradient(140deg, var(--accent-sage), var(--accent-steel));
@@ -76,12 +86,12 @@
             <i class="bi bi-gear me-1"></i>Configuration</a>
         </li>
       </ul>
-      {% comment %} Actions propres à la page, dans la barre de navigation :
-         évite une seconde ligne juste pour quelques boutons. La zone existe
-         toujours, même vide : c'est la colonne symétrique de la marque, et
-         c'est cette symétrie qui tient le centrage des onglets.
-         {% endcomment %}
-      <div class="zone-actions d-flex align-items-center justify-content-end gap-2">
+     </div>
+
+      {% comment %} Seconde ligne : les actions propres à la page, puis celles
+         communes à toutes. Les tenir à l'écart de la ligne des onglets est ce
+         qui empêche celle-ci de bouger d'une page à l'autre. {% endcomment %}
+      <div class="zone-actions">
         {% block nav_actions %}{% endblock %}
         <button type="button" class="btn btn-sm btn-outline-secondary"
                 data-bs-toggle="modal" data-bs-target="#modalAPropos"
