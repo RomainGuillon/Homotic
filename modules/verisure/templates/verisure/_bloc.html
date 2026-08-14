@@ -1,0 +1,32 @@
+{% if non_configure %}
+  <p class="text-secondary mb-0"><i class="bi bi-exclamation-triangle me-1"></i>
+    Non configuré — renseigner le compte Verisure dans l'onglet Alarme.</p>
+{% elif erreur %}
+  <p class="text-danger small mb-0"><i class="bi bi-wifi-off me-1"></i>{{ erreur }}</p>
+{% else %}
+  {% if stale %}
+    <p class="small text-warning mb-2"><i class="bi bi-wifi-off me-1"></i>Verisure injoignable — dernière valeur connue.</p>
+  {% endif %}
+
+  <div class="d-flex align-items-center justify-content-center gap-3">
+    <div>{{ svg|safe }}</div>
+    <div>
+      <div class="mb-1"><span class="badge rounded-pill {{ badge }}">{{ etat.libelle }}</span></div>
+      {% if etat.change_le %}
+        <div class="small text-secondary">depuis le {{ etat.change_le|slice:":16"|cut:"T" }}</div>
+      {% endif %}
+      {% if not etat.wifi %}
+        <div class="small text-danger mt-1"><i class="bi bi-wifi-off me-1"></i>Centrale hors ligne</div>
+      {% endif %}
+      {% if etat.anomalies %}
+        <div class="small text-warning mt-1">
+          <i class="bi bi-exclamation-triangle me-1"></i>{{ etat.anomalies|length }} anomalie{{ etat.anomalies|pluralize }}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if ts %}
+    <div class="small text-secondary text-center mt-2">lu à {{ ts|date:"H:i" }}</div>
+  {% endif %}
+{% endif %}
