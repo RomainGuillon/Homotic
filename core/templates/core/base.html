@@ -26,9 +26,16 @@
     .barre-nav {
       display: flex;
       flex-direction: column;
+      /* Bootstrap pose « align-items: center » sur .navbar > .container-fluid.
+         En colonne, ce centrage s'applique à l'horizontale : sans le
+         « stretch » ci-dessous, les deux lignes se réduisent à la largeur de
+         leur contenu et se centrent — la marque n'est alors plus collée à
+         gauche. */
+      align-items: stretch;
       gap: .35rem;
       width: 100%;
     }
+    .barre-nav > * { width: 100%; }
     .barre-onglets {
       display: grid;
       grid-template-columns: auto 1fr;
