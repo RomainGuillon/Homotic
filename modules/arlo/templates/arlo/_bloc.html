@@ -8,22 +8,24 @@
     <p class="small text-warning mb-2"><i class="bi bi-plug me-1"></i>Arlo injoignable — dernière valeur connue.</p>
   {% endif %}
 
-  <div class="d-flex align-items-center justify-content-between mb-2">
-    <span><i class="bi bi-{{ icone }} me-2"></i>Surveillance</span>
-    <span class="badge rounded-pill {{ badge }}">{{ etat.libelle }}</span>
+  <div class="d-flex justify-content-around align-items-start text-center">
+    {% for m in modes %}
+      <div class="px-1" style="{% if not m.actif %}opacity:.35{% endif %}">
+        <div><i class="bi bi-{{ m.icone }} {% if m.actif %}{{ m.couleur }}{% else %}text-secondary{% endif %}"
+                style="font-size:1.9rem"></i></div>
+        <div class="small {% if m.actif %}fw-bold {{ m.couleur }}{% else %}text-secondary{% endif %}">{{ m.libelle }}</div>
+      </div>
+    {% endfor %}
   </div>
 
   {% if camera %}
-    {% if camera.image %}
-      <img src="{{ camera.image }}" alt="{{ camera.nom }}" class="img-fluid rounded mb-2" style="width:100%">
-    {% endif %}
-    <div class="d-flex justify-content-between small text-secondary">
+    <div class="d-flex justify-content-between small text-secondary border-top mt-3 pt-2">
       <span>{{ camera.nom }}</span>
       <span class="{{ classe_batterie }}"><i class="bi bi-battery-half me-1"></i>{{ camera.batterie }} %</span>
     </div>
   {% endif %}
 
   {% if ts %}
-    <div class="small text-secondary text-center mt-2">lu à {{ ts|date:"H:i" }}</div>
+    <div class="small text-secondary text-center mt-1">lu à {{ ts|date:"H:i" }}</div>
   {% endif %}
 {% endif %}

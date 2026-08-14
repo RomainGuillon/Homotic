@@ -16,8 +16,21 @@ _ICONES = {
 }
 
 
+# Couleurs de texte, pour le bloc du tableau de bord : le mode actif est
+# coloré, les deux autres restent gris. Même grammaire que les badges.
+_TEXTES = {
+    "armAway": "text-success",
+    "armHome": "text-warning",
+    "standby": "text-info",
+}
+
+
 def badge_classe(code):
     return _BADGES.get(code, "text-bg-danger")
+
+
+def couleur_texte(code):
+    return _TEXTES.get(code, "text-danger")
 
 
 def icone(code):

@@ -198,16 +198,31 @@
               <label class="form-label">Serveur IMAP</label>
               <input type="text" name="imap_hote" class="form-control" value="{{ params.imap_hote }}"
                      placeholder="imap.mail.me.com">
+              <div class="form-text">Port 993 par défaut. Pour un autre port,
+                l'écrire ici : <code>serveur:port</code>.</div>
             </div>
             <div class="col-12 col-md-4">
               <label class="form-label">Utilisateur IMAP</label>
               <input type="text" name="imap_utilisateur" class="form-control"
                      value="{{ params.imap_utilisateur }}">
+              <div class="form-text">Sur iCloud, la partie avant le <code>@</code>
+                (<code>jeanmartin</code>, pas <code>jeanmartin@me.com</code>) — si ça
+                échoue, réessayer avec l'adresse complète. Ce n'est <strong>pas</strong>
+                le nom donné au mot de passe d'application.</div>
             </div>
             <div class="col-12 col-md-4">
               <label class="form-label">Mot de passe IMAP</label>
               <input type="password" name="imap_mot_de_passe" class="form-control" autocomplete="new-password"
                      placeholder="{% if params.a_imap_mot_de_passe %}•••••• (laisser vide pour conserver){% else %}mot de passe d'application{% endif %}">
+              <div class="form-text">Le mot de passe d'application généré
+                (<code>xxxx-xxxx-xxxx-xxxx</code>), jamais celui du compte.</div>
+            </div>
+            <div class="col-12">
+              <div class="form-text">Homotic ne cherche le code que dans la boîte
+                de réception, dans les messages venant de
+                <code>do_not_reply@arlo.com</code> : si une règle les range
+                ailleurs, il ne les trouvera pas. Les messages ne sont pas
+                marqués comme lus.</div>
             </div>
           </div>
 
