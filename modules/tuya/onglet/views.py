@@ -36,9 +36,14 @@ def onglet(request):
             if action == "params":
                 _save_params(request)
             elif action == "refresh":
-                api.get_sensors_cached(force=True)
-                api.get_plugs_cached(force=True)
-                messages.success(request, "Capteurs et prises actualisés.")
+                # Une seule collecte pour capteurs + prises. « complet »
+                # recharge aussi la liste des appareils et les timers :
+                # c'est un geste manuel et rare, donc on l'assume ici.
+                erreur = api.rafraichir(complet=True)
+                if erreur:
+                    messages.error(request, f"Échec : {erreur}")
+                else:
+                    messages.success(request, "Capteurs et prises actualisés.")
             elif action == "plug":
                 on = request.POST.get("on") == "1"
                 api.set_plug(
