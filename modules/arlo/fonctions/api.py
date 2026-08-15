@@ -65,6 +65,13 @@ _client = None                 # instance PyArlo, unique pour le processus
 _verrou = threading.Lock()     # sérialise les accès au client
 _fil_connexion = None          # fil de la connexion en cours
 _fil_photo = None              # fil de l'instantané en cours
+_derniere_tentative = 0.0      # monotonic() de la dernière reconnexion tentée
+
+# Délai minimal entre deux reconnexions automatiques. Sans lui, une session
+# définitivement perdue ferait redemander un code à chaque battement de la
+# tâche : un mail d'Arlo toutes les cinq minutes jusqu'au retour de
+# l'utilisateur.
+DELAI_RETENTE_S = 900
 
 
 class ErreurArlo(RuntimeError):
@@ -94,7 +101,19 @@ def source_2fa():
 
 
 def etat_connexion():
-    return get_setting("etat_connexion", module=MODULE, default=DECONNECTE) or DECONNECTE
+    """État de connexion affiché par l'onglet.
+
+    Le réglage est enregistré en base, donc il survit aux redémarrages du
+    service — alors que le client, lui, disparaît avec le processus. Un
+    « connecté » hérité d'avant un redémarrage ne veut donc rien dire :
+    c'est la présence du client en mémoire qui fait foi.
+    """
+    valeur = get_setting("etat_connexion", module=MODULE, default=DECONNECTE) or DECONNECTE
+    if valeur == CONNECTE:
+        with _verrou:
+            if _client is None:
+                return DECONNECTE
+    return valeur
 
 
 def message_connexion():
@@ -205,7 +224,7 @@ def _construire():
 
 def _connecter():
     """Corps du fil de connexion."""
-    global _client
+    global _client, _derniere_tentative
     try:
         _poser_etat(EN_COURS, "Connexion à Arlo en cours…")
         arlo = _construire()
@@ -215,6 +234,7 @@ def _connecter():
         return
     with _verrou:
         _client = arlo
+    _derniere_tentative = 0.0  # une future perte sera traitée sans attendre
     _poser_etat(CONNECTE, "")
     journal("Connecté à Arlo", module=MODULE)
     try:
@@ -458,19 +478,69 @@ def photo_en_cours():
 # Tâche périodique
 # ----------------------------------------------------------------------
 
+def client_vivant():
+    """Le client en mémoire répond-il encore ?
+
+    Un jeton expiré laisse derrière lui un objet qui a l'air normal mais
+    dont toutes les requêtes échouent. Sans ce contrôle, la tâche
+    continuerait de le tenir pour bon et ne se reconnecterait jamais.
+    """
+    with _verrou:
+        client = _client
+    if client is None:
+        return False
+    try:
+        return bool(client.is_connected)
+    except Exception:
+        return False
+
+
+def _tenter_reconnexion():
+    """Relance la connexion perdue, sans harceler Arlo.
+
+    On ne se fie qu'à la mémoire du processus, jamais à l'état enregistré
+    en base : celui-ci survit aux redémarrages du service et vaut encore
+    « connecté » alors que le client a disparu avec l'ancien processus.
+    C'est précisément ce qui laissait le module hors service — sans la
+    moindre trace dans le journal — jusqu'au prochain clic sur
+    « Se connecter ».
+    """
+    global _derniere_tentative
+
+    if connexion_en_cours():
+        return False
+
+    maintenant = time_mod.monotonic()
+    if _derniere_tentative and maintenant - _derniere_tentative < DELAI_RETENTE_S:
+        return False
+
+    _derniere_tentative = maintenant
+    journal("Connexion Arlo perdue — reconnexion automatique", module=MODULE,
+            level=LogEntry.WARNING)
+    return demarrer_connexion()
+
+
 def tache_actualiser():
     """Rafraîchit le mode et l'état des caméras.
 
-    Relance aussi la connexion si elle a été perdue — un jeton Arlo expire, et
-    sans ça les scénarios cesseraient d'agir en silence. C'est justement le
-    moment où on en a besoin.
+    Relance aussi la connexion si elle a été perdue — un jeton Arlo expire,
+    le service redémarre, et sans ce filet les scénarios cesseraient d'agir
+    en silence. C'est justement le moment où on en a besoin.
     """
     if not configured():
         return
+
     with _verrou:
         absent = _client is None
     if absent:
-        if etat_connexion() in (DECONNECTE, ERREUR) and not connexion_en_cours():
-            demarrer_connexion()
+        _tenter_reconnexion()
         return
+
     etat_cached(force=True)
+
+    # La lecture ci-dessus ne lève jamais : elle se rabat sur la dernière
+    # valeur connue. C'est donc ici, et seulement ici, qu'une session morte
+    # se remarque.
+    if not client_vivant():
+        deconnecter()
+        _tenter_reconnexion()
