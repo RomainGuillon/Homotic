@@ -1,38 +1,80 @@
 # Homotic
 
-Tableau de bord domestique modulaire : mesures en direct, scénarios
-d'automatisation, et pilotage des consommations selon la production solaire
-et les tarifs EDF. Projet Django, base SQLite `db.sqlite3`, port 8100.
+Tableau de bord domestique modulaire, écrit en Django. Il réunit les mesures
+de la maison en direct, un éditeur de scénarios d'automatisation, et pilote
+les consommations selon la production solaire et les tarifs EDF.
 
-## Lancement
+![Tableau de bord](docs/images/03-tableau-de-bord.png)
 
-```bat
-cd C:\Dev\Homotic
-.venv\Scripts\activate
+L'idée directrice : **le socle ne connaît aucun équipement**. Ajouter une
+capacité — une marque de caméras, un onduleur, un fournisseur de prévisions —
+se fait en déposant un répertoire dans `modules/`, sans toucher au reste.
+Chaque module déclare ce qu'il expose, et le socle le branche tout seul dans
+le tableau de bord, le scheduler et l'éditeur de scénarios.
+
+## Ce que ça fait
+
+- **Tableau de bord** organisable en glisser-déposer : ordre et largeur des
+  blocs enregistrés en base, donc identiques depuis le PC et le téléphone.
+- **Éditeur de scénarios** par blocs, sans écrire de code : déclencheurs
+  (heure fixe, heure calculée, périodique, bouton, switch), conditions avec
+  opérateurs et parenthésage, actions, blocs Si/Alors/Sinon et boucles
+  imbricables sur trois niveaux.
+- **Scheduler** (APScheduler) qui exécute les tâches déclarées par les
+  modules, avec une périodicité surchargeable depuis l'interface.
+- **Neuf modules livrés** : énergie solaire, prévisions, tarifs Tempo,
+  chauffe-eau, climatisation, capteurs, caméras, alarme, et un module de
+  calcul qui arbitre l'heure de chauffe du ballon.
+- **Exposé sur Internet** : authentification obligatoire par défaut, HTTPS,
+  déploiement par systemd et nginx.
+
+## Démarrage rapide
+
+```bash
+git clone https://github.com/RomainGuillon/Homotic.git
+cd Homotic
+python -m venv .venv && source .venv/bin/activate   # Windows : .venv\Scripts\activate
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py createsuperuser
 python manage.py runserver 0.0.0.0:8100
 ```
 
-Puis ouvrir http://localhost:8100/
+Puis ouvrir <http://localhost:8100/> et se connecter. L'application est fermée
+par défaut : aucune page n'est accessible sans session.
 
-## Interface
+Aucune configuration n'est nécessaire pour démarrer — les clés d'API des
+modules se saisissent dans l'interface, et rien n'est stocké dans le dépôt.
+Pour une installation exposée sur Internet, voir
+[docs/10-mise-en-ligne.md](docs/10-mise-en-ligne.md).
 
-Thème reprenant l'identité de la v1 (`core/static/core/theme.css` : palette
-ardoise, accents désaturés, cartes très arrondies, halos diffus) appliqué
-par-dessus Bootstrap.
+## Documentation
 
-Le tableau de bord est organisable : bouton **Organiser** → glisser-déposer
-pour l'ordre, sélecteur de largeur par bloc (un tiers / moitié / deux tiers /
-pleine largeur), enregistrement en base (`DashboardBlock`), bouton
-« Par défaut » pour revenir à la disposition d'origine.
+Le [sommaire complet](docs/README.md) couvre l'installation, la prise en main,
+les scénarios, les modules livrés, la création d'un module, la référence des
+contrats et le dépannage. Trois entrées pour commencer :
+
+- [Prise en main](docs/02-prise-en-main.md) — l'onglet Configuration
+- [Créer un module](docs/06-creer-un-module.md) — le contrat, avec un exemple complet
+- [Référence des contrats](docs/07-reference-contrats.md) — `conf.py` et services du socle
 
 ## Structure
 
-- `homotic/` — configuration du projet Django (settings, urls)
-- `core/` — le socle : 3 onglets (Tableau de bord, Journal, Configuration),
-  table de logs unique (colonne `module`), configuration clé/valeur
-- `modules/` — les modules "plugins" (voir `modules/README.md`)
+```
+Homotic/
+├── core/          socle : onglets permanents, scénarios, scheduler, liaisons
+├── modules/       un répertoire par module (voir modules/README.md)
+├── homotic/       configuration Django (settings, urls)
+├── deploiement/   systemd, nginx, script de mise à jour du serveur
+├── docs/          documentation
+└── manage.py
+```
 
-## Helpers pour le code des modules
+Les modules ne s'appellent jamais entre eux : ils déclarent ce dont ils ont
+besoin, et l'utilisateur branche les liaisons dans la configuration — voir
+[Liaisons entre modules](docs/09-liaisons-entre-modules.md).
+
+## Écrire un module
 
 ```python
 from core.services import journal, get_setting, set_setting, get_variable, set_variable
@@ -42,35 +84,27 @@ set_setting("api_key", "xxx", module="enphase", secret=True)
 get_setting("api_key", module="enphase")
 ```
 
+Un module minimal se résume à un `conf.py` qui déclare son onglet, ses
+fonctions de scénario, ses lectures et ses tâches. Le module `modules/exemple/`
+sert de squelette.
+
 ## Feuille de route
 
-1. ✅ Socle (onglets, base, journal, configuration clé/valeur)
-2. ✅ Boutons poussoirs & switchs + bloc Scénarios sur le tableau de bord
-3. ✅ Contrat de module + détection dans `modules/` + activation
-4. ✅ Premier module réel (Tempo) + contrat dashboard (`dashboard/views.py` → `bloc(request)`)
-5. ✅ Scheduler (APScheduler) : contrat `TACHES` dans le `conf.py` des modules,
-   périodicité surchargeable en base (`tache_<nom>_minutes`, 0 = désactivée)
-6. ✅ Éditeur de scénarios par blocs : déclencheurs (heure fixe, bouton, switch,
-   manuel), conditions (état switch, plage horaire), actions (fonction module,
-   régler switch, lancer scénario, message journal) — mode avancé Python
-   restreint à venir
-6b. ✅ Extensions éditeur : déclencheur « heure calculée » (heure lue chaque
-   minute dans une variable ou une info de module, ex. heure_demarrage),
-   variables globales (conditions avec opérateurs,
-   action d'affectation), déclencheur périodique (toutes les X min, fenêtre
-   horaire optionnelle), plage horaire « dans / hors », bloc Si/Alors/Sinon,
-   boucles Tant que / Jusqu'à ce que (intervalle + durée max + conditions de
-   sortie anticipée), blocs Si/Boucle imbricables sur 3 niveaux, contrat INFOS
-   (fonctions de lecture par module, utilisables en condition avec opérateurs
-   et en action Info→variable), catalogues regroupés par module
-7. ✅ Modules portés : chauffe_eau (Cozytouch), tuya (capteurs + prises),
-   clim (Hi-Kumo), enphase (Envoy, flux animé, publie enphase_*_w),
-   solcast (prévisions, meilleur créneau chauffe-eau, publie solcast_prevu_*),
-   heure_demarrage (module de calcul sans bloc dashboard : meilleure heure de
-   démarrage du chauffe-eau, arbitrage coût jour solaire / nuit HC, switchs
-   exclusifs Été/Hiver) — présentation identique à la v1 (bloc dashboard + onglet).
-   Enphase inclut la partie cloud Enlighten v4 : cumuls du jour précis,
-   coût EDF par tranche (Tempo × HP/HC), courbes production/consommation
-   15 min, bloc « La journée » sur le dashboard, ligne « réel » de la
-   courbe Solcast
-8. IA / optimisation (chauffe-eau vs production solaire vs Tempo)
+- [x] Socle : onglets, journal, configuration clé/valeur, boutons et switchs
+- [x] Contrat de module, détection automatique, activation depuis l'interface
+- [x] Scheduler avec périodicités surchargeables
+- [x] Éditeur de scénarios : blocs Si, boucles, variables, infos typées
+- [x] Liaisons déclaratives entre modules
+- [x] Neuf modules : énergie, solaire, tempo, chauffe-eau, clim, capteurs,
+      caméras, alarme, heure de démarrage
+- [x] Mise en ligne : authentification, HTTPS, systemd, script de déploiement
+- [ ] Optimisation automatique (chauffe-eau × production solaire × Tempo)
+
+## Pile technique
+
+Django 5.1+, SQLite en WAL, APScheduler, Bootstrap. Aucun service externe
+n'est requis pour faire tourner le socle.
+
+## Licence
+
+[MIT](LICENSE) — Romain Guillon.

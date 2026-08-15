@@ -96,3 +96,16 @@ filtre par module et par niveau (info, avertissement, erreur).
 C'est le premier endroit à consulter quand un comportement surprend : les
 scénarios y écrivent leur origine de déclenchement et, en cas d'échec, la
 condition qui n'était pas remplie.
+
+### Faire le ménage
+
+Deux moyens, complémentaires :
+
+- **La conservation automatique** — un nombre de jours, réglable depuis
+  l'onglet. Les entrées plus anciennes sont supprimées, et la purge écrit
+  elle-même une ligne pour signaler qu'elle a eu lieu. La régler à `0`
+  désactive le ménage : le journal grossit alors sans limite, ce que
+  l'interface signale.
+- **La suppression à la demande** — le bouton de l'onglet Journal efface ce
+  que le filtre courant affiche. Filtrer sur un module bavard puis purger
+  évite de tout perdre pour faire de la place.

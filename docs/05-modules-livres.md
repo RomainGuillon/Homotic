@@ -11,7 +11,9 @@ Chaque module se paramètre dans son propre onglet, section « Paramétrage ».
 | `enphase` | Énergie | Passerelle Envoy locale : production, consommation, réseau, courbe du jour |
 | `solcast` | Solaire | Prévisions de production, meilleur créneau de chauffe |
 | `tempo` | Tempo | Couleurs des jours EDF Tempo et tarifs |
-| `tuya` | Capteurs | Capteurs et prises Tuya |
+| `tuya` | Capteurs | Capteurs et prises Tuya, lus sur le réseau local |
+| `arlo` | Caméras | Mode de surveillance des caméras Arlo et instantanés |
+| `verisure` | Alarme | État de l'alarme Verisure, en lecture seule |
 | `heure_demarrage` | Heure démarrage | Calcule la meilleure heure de chauffe du ballon |
 
 ## Énergie (Enphase)
@@ -39,6 +41,34 @@ si le scheduler tourne.
 
 Publie les variables `enphase_production_w`, `enphase_conso_w`,
 `enphase_import_w`, `enphase_export_w`.
+
+### Deux pinces ou trois
+
+Les mesures sont lues sur les **pinces ampèremétriques** du tableau, en une
+seule requête. C'est la source à privilégier : l'ancien chemin
+(`/production.json`) fait interroger les micro-onduleurs un par un, et une
+seule radio muette en toiture fait pendre la requête plusieurs dizaines de
+secondes.
+
+Beaucoup d'installations n'ont que **deux pinces** — production et réseau —
+sans celle de consommation totale. La consommation de la maison se déduit
+alors : ce qui est produit, plus ce qui est pris au réseau, moins ce qui y
+repart. Rien à régler, le module détecte le brochage et s'y adapte ; il le
+mémorise ensuite, le câblage ne changeant pas d'un relevé à l'autre.
+
+Si aucune pince n'est exploitable, le module repasse tout seul sur
+`/production.json`. L'onglet indique la source réellement utilisée.
+
+### Quand la passerelle ne répond plus
+
+Un **coupe-circuit** s'ouvre après trois échecs consécutifs et suspend les
+appels pendant cinq minutes. Les pages continuent de s'afficher, avec la
+dernière valeur connue et la mention « appels suspendus ».
+
+Sans lui, une Envoy injoignable faisait attendre chaque affichage du tableau
+de bord le temps des délais d'attente, et remplissait le Journal de milliers
+de lignes identiques. Tant que la panne dure, un seul rappel est écrit par
+heure.
 
 ## Solaire (Solcast)
 
@@ -118,11 +148,103 @@ Couleurs des jours EDF Tempo via l'API RTE, tarifs heures pleines / creuses
 par couleur, compteurs de saison. Alimente l'arbitrage de coût du module
 Heure de démarrage.
 
-## Chauffe-eau, Climatisation, Capteurs
+## Caméras (Arlo)
+
+Pilote le **mode de surveillance** des caméras Arlo et prend des instantanés.
+
+| Mode | Code Arlo |
+| --- | --- |
+| En absence | `armAway` |
+| En présence | `armHome` |
+| En veille | `standby` |
+
+Le bloc du tableau de bord affiche les trois modes en icônes ; le mode
+courant est mis en valeur, et un clic bascule. Les mêmes bascules existent en
+actions de scénario (`mode_absence`, `mode_presence`, `mode_veille`,
+`photo`), de quoi armer les caméras quand l'alarme passe en totale.
+
+Infos publiées : `arlo_mode` (en clair), `arlo_mode_code` (code Arlo),
+`arlo_batterie` (première caméra, en %).
+
+### La connexion et le code à deux facteurs
+
+Arlo réclame un **code à deux facteurs** à la première connexion. Il se
+saisit dans l'onglet du module : la connexion se fait dans un fil
+d'exécution séparé et attend le code jusqu'à cinq minutes, plutôt que de
+suspendre une requête web. Aucun identifiant de boîte mail n'est donc
+nécessaire — une lecture automatique par IMAP reste possible en option.
+
+La session est ensuite conservée sur le disque (répertoire `.arlo/`, hors du
+dépôt) pour survivre aux redémarrages du service : sans elle, Arlo
+redemanderait un code à chaque relance. Ce répertoire contient un jeton
+d'accès au compte, il ne doit jamais être versionné.
+
+La tâche périodique sert de filet : `pyaarlo` garde une connexion ouverte qui
+reçoit les changements en direct, et la tâche relit l'état et relance la
+connexion si le jeton a expiré.
+
+Les tentatives de reconnexion sont **espacées progressivement** :
+15 min → 30 min → 1 h → 2 h → 4 h. Une coupure passagère est donc rattrapée
+vite, tandis qu'une session définitivement perdue (mot de passe changé) ne
+fait pas frapper à la porte d'Arlo une centaine de fois par jour — ce qui
+redemanderait un code à deux facteurs autant de fois.
+
+> Le **direct n'est pas affichable** : Arlo ne publie qu'un flux RTSPS,
+> qu'aucun navigateur ne lit. Le module s'appuie donc sur l'instantané, dont
+> l'URL signée reste valable une trentaine d'heures.
+
+## Alarme (Verisure)
+
+État de l'alarme Verisure France — **en lecture seule, délibérément**.
+
+| Info | Contenu |
+| --- | --- |
+| `alarme_etat` | En clair : Désarmée, Partielle, Totale |
+| `alarme_armee` | `on` si armée, `off` sinon |
+| `alarme_code` | Code protocole brut (`D`, `P`/`Q`, `T`) |
+
+Le bloc du tableau de bord affiche un bouclier et la date du dernier
+changement. Le module n'expose **aucune action de scénario** : rien dans le
+code ne peut armer ni désarmer.
+
+C'est un choix de cloisonnement. Les identifiants stockés pourraient
+techniquement désarmer l'alarme — l'API ne réclame pas de code PIN côté
+serveur — et Verisure ne propose pas de rôle « lecture seule ». Ne pas
+écrire la fonction est la seule barrière disponible.
+
+L'usage prévu est donc l'inverse : l'alarme **déclenche**, elle n'obéit pas.
+Une condition sur `alarme_armee` suffit à faire passer les caméras en
+absence quand la maison est armée.
+
+> Verisure n'impose pas de quota mensuel, mais un pare-feu applicatif répond
+> `403` quand les requêtes s'enchaînent. La période par défaut est donc de
+> **3 minutes** ; l'allonger est le premier réflexe en cas de blocage.
+
+## Capteurs (Tuya)
+
+Capteurs de température et d'humidité, et prises commandables. Les prises
+apparaissent automatiquement en actions de scénario, une paire
+allumer/éteindre par prise détectée.
+
+Les appareils sont lus **sur le réseau local**, sans passer par le cloud
+Tuya : ni quota, ni compte à interroger, ni panne d'internet qui tienne — et
+les mesures arrivent plus vite. L'API Cloud reste en **repli** si la lecture
+locale échoue.
+
+Dans une installation Zigbee, les capteurs n'ont pas d'adresse IP : le module
+ouvre **une seule connexion vers la passerelle** et interroge chaque appareil
+au travers. Une seule clé locale est donc nécessaire, celle de la passerelle.
+
+Le paramétrage s'importe en une fois depuis le fichier `devices.json` produit
+par `python -m tinytuya wizard` (adresses, clés, identifiants de
+sous-appareils et correspondance des mesures). Après quoi le cloud n'est plus
+sollicité.
+
+## Chauffe-eau et Climatisation
 
 Modules d'équipement : ils exposent leur état en **infos** et leurs
-commandes en **actions de scénario**. Le paramétrage (identifiants
-Cozytouch, Hi-Kumo, Tuya) se fait dans l'onglet du module.
+commandes en **actions de scénario**. Le paramétrage (identifiants Cozytouch,
+Hi-Kumo) se fait dans l'onglet du module.
 
 Le chauffe-eau Atlantic n'a pas de commande « chauffer » directe : forcer
 une chauffe complète revient à régler le **nombre de douches souhaitées au

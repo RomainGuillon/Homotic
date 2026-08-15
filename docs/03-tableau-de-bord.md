@@ -16,8 +16,12 @@ Un module peut fournir plusieurs blocs (le module Énergie en propose deux :
 
 ## Barre d'actions
 
-Les commandes du tableau de bord sont dans la barre de navigation, à droite
-des onglets :
+La barre de navigation tient sur **deux lignes** : la marque à gauche et les
+onglets centrés sur la première, les icônes d'action sur la seconde. Sur un
+écran étroit, la marque passe au-dessus des onglets plutôt que de les
+comprimer, et les actions se centrent.
+
+Les commandes du tableau de bord sont ces icônes de la seconde ligne :
 
 | Commande | Effet |
 | --- | --- |

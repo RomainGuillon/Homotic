@@ -63,8 +63,9 @@ interroger un appareil ou une API.
 
 ## Conditions — sous quelles réserves ?
 
-Quatre types : **état d'un switch**, **plage horaire** (dans / hors),
-**variable** (avec opérateurs), **info d'un module** (avec opérateurs).
+Cinq types : **état d'un switch**, **plage horaire** (dans / hors),
+**variable** (avec opérateurs), **info d'un module** (avec opérateurs), et
+**groupe** (voir le parenthésage ci-dessous).
 
 Aucune condition = le scénario s'exécute toujours.
 
@@ -82,6 +83,24 @@ A ET B OU C ET D    se lit    (A ET B) OU (C ET D)
 
 Quand aucune branche n'est remplie, le Journal détaille pourquoi chacune a
 échoué, au lieu de ne donner qu'une seule raison.
+
+### Parenthéser avec un groupe
+
+Cette priorité fixe ne suffit pas toujours : **« A ET B ET (C OU D) »** ne
+s'écrit avec aucune liste plate. D'où la condition de type **groupe**, qui
+porte sa propre liste de conditions et compte pour une seule dans la liste
+qui la contient.
+
+```
+A
+B
+groupe ( C  OU  D )
+```
+
+Le groupe s'évalue à part, exactement comme une parenthèse. Un groupe vide
+est neutre, il ne bloque rien. Le lien ET / OU qui précède le groupe se règle
+comme sur n'importe quelle autre ligne, et le Journal préfixe l'explication
+d'un refus par « groupe : » pour indiquer d'où vient l'échec.
 
 ## Actions — que faire ?
 

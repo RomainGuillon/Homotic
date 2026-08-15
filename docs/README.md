@@ -12,7 +12,7 @@ solaire et les tarifs EDF.
 | [2. Prise en main](02-prise-en-main.md) | Onglet Configuration : modules, boutons, switchs, variables |
 | [3. Tableau de bord](03-tableau-de-bord.md) | Blocs, mode Organiser, rafraîchissement |
 | [4. Scénarios](04-scenarios.md) | Déclencheurs, conditions, actions, blocs Si et boucles |
-| [5. Modules livrés](05-modules-livres.md) | Chauffe-eau, Clim, Énergie, Solaire, Tempo, Capteurs, Heure de démarrage |
+| [5. Modules livrés](05-modules-livres.md) | Énergie, Solaire, Tempo, Chauffe-eau, Clim, Capteurs, Caméras, Alarme, Heure de démarrage |
 | [6. Créer un module](06-creer-un-module.md) | Structure, contrats, association au socle, exemple complet |
 | [7. Référence des contrats](07-reference-contrats.md) | `conf.py`, services du socle, formats attendus |
 | [8. Dépannage](08-depannage.md) | Le scheduler ne tourne pas, quotas d'API, pièges connus |

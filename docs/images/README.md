@@ -26,6 +26,16 @@ casser la page — la doc reste lisible pendant que les captures sont prises.
 | `05-heure-demarrage.png` | L'onglet Heure de démarrage avec le détail du calcul | [Modules livrés](../05-modules-livres.md) |
 | `06-activation.png` | La section Modules au moment de cocher un nouveau module | [Créer un module](../06-creer-un-module.md) |
 
+Les trois captures suivantes restent **à prendre**. Contrairement aux
+précédentes, elles ne sont pas encore appelées dans la documentation : y
+insérer `![Description](images/nom.png)` une fois l'image déposée.
+
+| Fichier | Contenu attendu | À insérer dans |
+| --- | --- | --- |
+| `05-cameras.png` | L'onglet Caméras : les trois modes et un instantané | [Modules livrés](../05-modules-livres.md), section Caméras |
+| `05-alarme.png` | Le bloc Alarme du tableau de bord, bouclier et date | [Modules livrés](../05-modules-livres.md), section Alarme |
+| `05-capteurs.png` | L'onglet Capteurs, températures et prises | [Modules livrés](../05-modules-livres.md), section Capteurs |
+
 ## Conseils
 
 - **Cadrer sur la zone utile** plutôt que sur l'écran entier : une capture

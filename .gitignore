@@ -17,6 +17,9 @@ __pycache__/
 # Produit par « manage.py collectstatic », reconstruit a chaque deploiement.
 staticfiles/
 
+# Dependances de « docs/build_docx.js » (npm install docx), reinstallables.
+node_modules/
+
 # Caches et jetons ecrits par les modules a l'execution
 modules/*/cache/
 *.token
@@ -28,6 +31,8 @@ modules/*/cache/
 
 # Artefacts de montage reseau (SMB) et d'editeurs
 .fuse_hidden*
+# Fichiers de verrouillage Word, crees en ouvrant la doc .docx
+~$*
 .DS_Store
 *.swp
 .idea/
