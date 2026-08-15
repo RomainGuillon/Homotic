@@ -15,6 +15,11 @@
   {% endif %}
 </div>
 <p class="text-secondary small mb-4">Capteurs et prises connectées Tuya
+  {% if params.mode == "local" %}
+    <span class="badge rounded-pill text-bg-dark ms-2"
+          title="Lecture directe sur le réseau, sans passer par les serveurs Tuya">
+      <i class="bi bi-hdd-network me-1"></i>réseau local</span>
+  {% endif %}
   {% if ts %}<span class="ms-2">· données du {{ ts|date:"d/m H:i" }}</span>{% endif %}</p>
 
 {% if not configured %}
@@ -85,8 +90,81 @@
   </div>
 {% endif %}
 
-{# ---------- Paramétrage (bloc dépliable) ---------- #}
+{# ---------- Paramétrage (blocs dépliables) ---------- #}
 <div class="accordion" id="accordionParams">
+
+  {# ---------- Réseau local ---------- #}
+  <div class="accordion-item">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button"
+              data-bs-toggle="collapse" data-bs-target="#collapseLocal">
+        <i class="bi bi-hdd-network me-2"></i>Paramétrage — Réseau local
+        {% if params.local_ok %}
+          <span class="badge rounded-pill text-bg-success ms-2">configuré</span>
+        {% endif %}
+      </button>
+    </h2>
+    <div id="collapseLocal" class="accordion-collapse collapse" data-bs-parent="#accordionParams">
+      <div class="accordion-body">
+        <p class="text-secondary small">
+          Les appareils sont lus directement sur le réseau, sans passer par les serveurs
+          Tuya : ni quota, ni coupure d'internet, et des mesures plus rapides. Les
+          identifiants nécessaires se récupèrent une seule fois avec
+          <code>python -m tinytuya wizard</code>, qui produit un fichier
+          <code>devices.json</code>.
+        </p>
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="params_local">
+          <div class="row g-3 mb-3">
+            <div class="col-12 col-md-4">
+              <label class="form-label">Mode de lecture</label>
+              <select name="mode" class="form-select">
+                <option value="cloud" {% if params.mode == "cloud" %}selected{% endif %}>API Cloud Tuya</option>
+                <option value="local" {% if params.mode == "local" %}selected{% endif %}>Réseau local</option>
+              </select>
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Adresse de la passerelle</label>
+              <input type="text" name="local_gateway_ip" class="form-control"
+                     placeholder="192.168.1.189" value="{{ params.local_ip }}">
+            </div>
+            <div class="col-6 col-md-2">
+              <label class="form-label">Protocole</label>
+              <select name="local_version" class="form-select">
+                <option value="3.4" {% if params.local_version == "3.4" %}selected{% endif %}>3.4</option>
+                <option value="3.3" {% if params.local_version == "3.3" %}selected{% endif %}>3.3</option>
+                <option value="3.5" {% if params.local_version == "3.5" %}selected{% endif %}>3.5</option>
+              </select>
+            </div>
+            <div class="col-6 col-md-2 d-flex align-items-end">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="repli_cloud"
+                       id="repliCloud" {% if params.repli_cloud %}checked{% endif %}>
+                <label class="form-check-label" for="repliCloud">Repli sur le cloud</label>
+              </div>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Contenu du fichier <code>devices.json</code></label>
+              <textarea name="devices_json" class="form-control font-monospace" rows="4"
+                        placeholder="{% if params.local_ok %}Configuration déjà importée — coller un nouveau fichier pour la remplacer.{% else %}Coller ici le contenu du fichier devices.json.{% endif %}"></textarea>
+              <div class="form-text">
+                {% if params.local_ok %}
+                  {{ params.local_capteurs }} capteur(s) et {{ params.local_prises }} prise(s)
+                  enregistrés. Ce fichier contient la clé de la passerelle : il n'est jamais réaffiché.
+                {% else %}
+                  Adresse, clé et identifiants des appareils en sont déduits automatiquement.
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          <button class="btn btn-primary">Enregistrer</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  {# ---------- API Cloud ---------- #}
   <div class="accordion-item">
     <h2 class="accordion-header">
       <button class="accordion-button {% if configured %}collapsed{% endif %}" type="button"

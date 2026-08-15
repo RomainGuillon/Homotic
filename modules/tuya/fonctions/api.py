@@ -34,6 +34,8 @@ import requests
 from core.models import LogEntry
 from core.services import get_setting, journal, set_setting
 
+from . import local
+
 MODULE = "tuya"
 
 # Appareils à masquer, par mot-clé dans le nom (device virtuel, passerelle).
@@ -71,9 +73,34 @@ def credentials():
     )
 
 
-def configured():
+def configured_cloud():
     cid, secret = credentials()
     return bool(cid and secret)
+
+
+def mode():
+    """« local » (réseau) ou « cloud » (API Tuya). Le cloud reste le défaut :
+    une installation existante ne doit pas changer de comportement toute
+    seule au premier déploiement."""
+    valeur = str(get_setting("mode", module=MODULE, default="cloud")).lower()
+    return "local" if valeur == "local" else "cloud"
+
+
+def repli_cloud_actif():
+    """En mode local, autorise-t-on le cloud quand le réseau ne répond pas ?
+
+    Activé par défaut : mieux vaut une donnée obtenue par un chemin plus
+    coûteux que pas de donnée du tout. À désactiver si l'on veut la
+    garantie qu'aucun appel cloud ne part (quota épuisé, par exemple).
+    """
+    return str(get_setting("repli_cloud", module=MODULE, default="1")) not in ("0", "false", "False", "")
+
+
+def configured():
+    """Le module a-t-il de quoi fonctionner, dans le mode choisi ?"""
+    if mode() == "local":
+        return local.configured() or (repli_cloud_actif() and configured_cloud())
+    return configured_cloud()
 
 
 def base_url():
@@ -330,8 +357,17 @@ def _devices(client, force=False):
     if data is not None and not force and not _perime(ts, DEVICES_TTL_MIN):
         return data
 
+    payload = client.get_devices_v2()
+    if not payload.get("success", False):
+        # Sans ce garde-fou, une réponse d'erreur (quota épuisé, jeton
+        # refusé) serait lue comme « aucun appareil » : collecter()
+        # écraserait les caches par des listes vides et l'onglet se
+        # viderait en silence. On lève, pour que _assurer_fraicheur()
+        # journalise et conserve la dernière valeur connue.
+        raise RuntimeError(payload.get("msg") or str(payload))
+
     devices = []
-    for dev in _device_list(client.get_devices_v2()):
+    for dev in _device_list(payload):
         device_id = dev.get("id")
         name = dev.get("customName") or dev.get("custom_name") or dev.get("name") or device_id
         if not device_id or _is_excluded(name):
@@ -383,7 +419,52 @@ def _timers(client, plug_ids, force=False):
 
 
 def collecter(force_devices=False, force_timers=False):
-    """Rafraîchit cache_sensors et cache_plugs en une seule passe.
+    """Rafraîchit cache_sensors et cache_plugs, par le chemin choisi.
+
+    En mode local, le cloud n'est sollicité qu'en dernier recours, et
+    seulement si le repli est autorisé.
+    """
+    global _derniere_collecte
+
+    if mode() == "local":
+        try:
+            return _collecter_local()
+        except Exception as exc:
+            if not (repli_cloud_actif() and configured_cloud()):
+                raise
+            journal(
+                f"Lecture locale indisponible ({exc}) — repli sur l'API Cloud.",
+                module=MODULE,
+                level=LogEntry.WARNING,
+            )
+    return _collecter_cloud(force_devices=force_devices, force_timers=force_timers)
+
+
+def _collecter_local():
+    """Collecte par le réseau local. Aucun appel à Tuya, aucun quota consommé.
+
+    Les programmations ne sont pas lisibles en local : on conserve celles
+    déjà connues du cache plutôt que d'afficher « pas de programmation »
+    à tort.
+    """
+    global _derniere_collecte
+
+    sensors, plugs = local.collecter()
+
+    programmations, _ts = _lire_cache("cache_timers")
+    if isinstance(programmations, dict):
+        for plug in plugs:
+            plug["schedule_slots"] = programmations.get(plug["id"], [])
+
+    maintenant = datetime.now()
+    _ecrire_cache("cache_sensors", sensors, ts=maintenant)
+    _ecrire_cache("cache_plugs", plugs, ts=maintenant)
+    _derniere_collecte = time_mod.time()
+    return sensors, plugs
+
+
+def _collecter_cloud(force_devices=False, force_timers=False):
+    """Collecte par l'API Cloud, en une seule passe.
 
     Coût : 1 appel de statut par lot de 20 appareils, plus la liste des
     appareils et les timers quand leurs caches ont expiré.
@@ -520,7 +601,27 @@ def _appliquer_etat_cache(device_id, on):
 
 
 def set_plug(device_id, switch_code, on, name=None):
-    """Allume/éteint une prise, journalise et met le cache à jour."""
+    """Allume/éteint une prise, journalise et met le cache à jour.
+
+    En mode local, la commande part sur le réseau : effet immédiat, pas
+    d'aller-retour par les serveurs Tuya. Le repli cloud vaut ici aussi —
+    une prise qui ne répond pas en LAN reste pilotable.
+    """
+    if mode() == "local":
+        try:
+            nom = local.set_plug(device_id, on)
+            journal(f"Prise « {name or nom} » -> {'ON' if on else 'OFF'} (local)", module=MODULE)
+            _appliquer_etat_cache(device_id, on)
+            return {"success": True, "local": True}
+        except Exception as exc:
+            if not (repli_cloud_actif() and configured_cloud()):
+                raise
+            journal(
+                f"Commande locale impossible ({exc}) — repli sur l'API Cloud.",
+                module=MODULE,
+                level=LogEntry.WARNING,
+            )
+
     client = _make_client()
     payload = client.send_commands(device_id, [{"code": switch_code, "value": bool(on)}])
     if not payload.get("success", False):

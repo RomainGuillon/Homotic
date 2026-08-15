@@ -5,7 +5,7 @@ from django.shortcuts import redirect, render
 
 from core.services import get_setting, journal, set_setting
 
-from ..fonctions import affichage, api
+from ..fonctions import affichage, api, local
 
 
 def _save_params(request):
@@ -29,12 +29,58 @@ def _save_params(request):
     messages.success(request, "Paramètres Tuya enregistrés.")
 
 
+def _save_params_local(request):
+    """Réglages du mode local, et import éventuel du devices.json.
+
+    L'import est traité en premier : si le fichier collé est invalide, on
+    refuse de basculer en local — sans quoi l'onglet se retrouverait dans
+    un mode qui ne peut pas fonctionner.
+    """
+    contenu = request.POST.get("devices_json", "").strip()
+    adresse = request.POST.get("local_gateway_ip", "").strip()
+    if adresse:
+        set_setting("local_gateway_ip", adresse, module=api.MODULE)
+
+    if contenu:
+        passerelle, appareils = local.configurer(contenu, ip=adresse)
+        capteurs = sum(1 for a in appareils if a["genre"] == "sensor")
+        prises = len(appareils) - capteurs
+        journal(
+            f"Configuration locale importée : passerelle « {passerelle['name'] } », "
+            f"{capteurs} capteur(s) et {prises} prise(s).",
+            module=api.MODULE,
+        )
+        messages.success(
+            request,
+            f"Configuration locale importée : {capteurs} capteur(s), {prises} prise(s).",
+        )
+
+    version = request.POST.get("local_version", "").strip()
+    if version:
+        set_setting("local_version", version, module=api.MODULE)
+
+    mode = "local" if request.POST.get("mode") == "local" else "cloud"
+    if mode == "local" and not local.configured():
+        messages.warning(
+            request,
+            "Mode local non activé : il manque la configuration de la passerelle.",
+        )
+        mode = "cloud"
+    set_setting("mode", mode, module=api.MODULE)
+    set_setting("repli_cloud", "1" if request.POST.get("repli_cloud") else "0", module=api.MODULE)
+
+    if not contenu:
+        messages.success(request, f"Mode de lecture : {mode}.")
+
+
 def onglet(request):
     if request.method == "POST":
         action = request.POST.get("action", "")
         try:
             if action == "params":
                 _save_params(request)
+            elif action == "params_local":
+                _save_params_local(request)
             elif action == "refresh":
                 # Une seule collecte pour capteurs + prises. « complet »
                 # recharge aussi la liste des appareils et les timers :
@@ -82,6 +128,8 @@ def onglet(request):
         for p in (plugs or [])
     ]
 
+    appareils_locaux = local.appareils()
+
     return render(
         request,
         "tuya/onglet.html",
@@ -97,6 +145,13 @@ def onglet(request):
                 "has_secret": bool(get_setting("access_secret", module=api.MODULE, default="")),
                 "region": get_setting("region", module=api.MODULE, default="eu"),
                 "tache_minutes": get_setting("tache_actualiser_minutes", module=api.MODULE, default="10"),
+                "mode": api.mode(),
+                "repli_cloud": api.repli_cloud_actif(),
+                "local_ok": local.configured(),
+                "local_ip": get_setting("local_gateway_ip", module=api.MODULE, default=""),
+                "local_version": local.version(),
+                "local_capteurs": sum(1 for a in appareils_locaux if a.get("genre") == "sensor"),
+                "local_prises": sum(1 for a in appareils_locaux if a.get("genre") != "sensor"),
             },
         },
     )

@@ -11,3 +11,9 @@ pyoverkiz>=1.13
 # sait pas les lire, d'ou la borne. La bibliotheque bouge avec le backend
 # d'Arlo : verifier ce module apres chaque montee de version.
 pyaarlo>=0.8.0.22
+
+# Module Capteurs : dialogue direct avec les appareils Tuya sur le reseau
+# local, sans passer par leur cloud (ni quota, ni panne d'internet). La 1.20
+# est celle validee avec la passerelle Zigbee : le mode « sous-appareil »
+# (parent + cid) n'existe pas dans les versions anciennes.
+tinytuya>=1.20

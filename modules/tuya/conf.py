@@ -2,7 +2,8 @@
 
 ONGLET = "Capteurs"
 ICONE = "thermometer-half"
-DESCRIPTION = "Capteurs température/humidité et prises connectées Tuya (API Cloud)."
+DESCRIPTION = ("Capteurs température/humidité et prises connectées Tuya, "
+               "lus sur le réseau local ou via l'API Cloud.")
 
 # Tâches périodiques (scheduler du socle) — surchargeable via
 # « tache_actualiser_minutes » (0 = désactivée).
