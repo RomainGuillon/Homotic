@@ -66,12 +66,17 @@ _verrou = threading.Lock()     # sérialise les accès au client
 _fil_connexion = None          # fil de la connexion en cours
 _fil_photo = None              # fil de l'instantané en cours
 _derniere_tentative = 0.0      # monotonic() de la dernière reconnexion tentée
+_echecs_consecutifs = 0        # espace les tentatives quand ça ne repart pas
 
-# Délai minimal entre deux reconnexions automatiques. Sans lui, une session
-# définitivement perdue ferait redemander un code à chaque battement de la
-# tâche : un mail d'Arlo toutes les cinq minutes jusqu'au retour de
-# l'utilisateur.
+# Attente avant une nouvelle tentative de reconnexion, doublée à chaque
+# échec consécutif et plafonnée. Sans cet espacement, une session
+# définitivement perdue (mot de passe changé, boîte mail inaccessible)
+# ferait frapper à la porte d'Arlo une centaine de fois par jour, et
+# redemander un code autant de fois. La progression 15 min → 30 → 1 h → 2 h
+# → 4 h ramène cela à moins d'une dizaine de tentatives quotidiennes, tout
+# en gardant une reprise rapide sur une coupure passagère.
 DELAI_RETENTE_S = 900
+DELAI_RETENTE_MAX_S = 4 * 3600
 
 
 class ErreurArlo(RuntimeError):
@@ -224,17 +229,21 @@ def _construire():
 
 def _connecter():
     """Corps du fil de connexion."""
-    global _client, _derniere_tentative
+    global _client, _derniere_tentative, _echecs_consecutifs
     try:
         _poser_etat(EN_COURS, "Connexion à Arlo en cours…")
         arlo = _construire()
     except Exception as exc:
+        _echecs_consecutifs += 1
         _poser_etat(ERREUR, str(exc))
         journal(f"Connexion Arlo échouée : {exc}", module=MODULE, level=LogEntry.ERROR)
         return
     with _verrou:
         _client = arlo
-    _derniere_tentative = 0.0  # une future perte sera traitée sans attendre
+    # Reprise à zéro : la prochaine coupure sera traitée sans attendre, et
+    # avec le délai le plus court.
+    _derniere_tentative = 0.0
+    _echecs_consecutifs = 0
     _poser_etat(CONNECTE, "")
     journal("Connecté à Arlo", module=MODULE)
     try:
@@ -495,6 +504,11 @@ def client_vivant():
         return False
 
 
+def delai_retente():
+    """Attente avant la prochaine tentative, en secondes."""
+    return min(DELAI_RETENTE_S * (2 ** _echecs_consecutifs), DELAI_RETENTE_MAX_S)
+
+
 def _tenter_reconnexion():
     """Relance la connexion perdue, sans harceler Arlo.
 
@@ -511,12 +525,20 @@ def _tenter_reconnexion():
         return False
 
     maintenant = time_mod.monotonic()
-    if _derniere_tentative and maintenant - _derniere_tentative < DELAI_RETENTE_S:
+    if _derniere_tentative and maintenant - _derniere_tentative < delai_retente():
         return False
 
     _derniere_tentative = maintenant
-    journal("Connexion Arlo perdue — reconnexion automatique", module=MODULE,
-            level=LogEntry.WARNING)
+    if _echecs_consecutifs:
+        journal(
+            f"Connexion Arlo toujours perdue — nouvelle tentative "
+            f"(échec n° {_echecs_consecutifs}, prochaine dans "
+            f"{delai_retente() // 60} min si celle-ci échoue)",
+            module=MODULE, level=LogEntry.WARNING,
+        )
+    else:
+        journal("Connexion Arlo perdue — reconnexion automatique", module=MODULE,
+                level=LogEntry.WARNING)
     return demarrer_connexion()
 
 
