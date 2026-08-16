@@ -87,6 +87,9 @@ def _traiter_post(request, action):
         else:
             messages.info(request, "Un instantané est déjà en cours.")
 
+    elif action == "diag":
+        messages.info(request, api.diagnostic())
+
     elif action == "refresh":
         _etat, _ts, erreur = api.etat_cached(force=True)
         if erreur:

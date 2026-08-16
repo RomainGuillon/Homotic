@@ -24,6 +24,7 @@ de source 2FA quelconque pourvu qu'il expose start/get/stop — c'est ce qui
 permet de ne pas avoir à stocker les identifiants d'une boîte mail.
 """
 
+import logging
 import threading
 import time as time_mod
 from datetime import datetime, timedelta
@@ -191,11 +192,70 @@ def deposer_code(code):
 # Connexion
 # ----------------------------------------------------------------------
 
+# ----------------------------------------------------------------------
+# Écho du logger de pyaarlo
+# ----------------------------------------------------------------------
+
+_logger_branche = False
+_dernier_echo = {"texte": "", "quand": 0.0, "repetitions": 0}
+
+
+class _EchoPyaarlo(logging.Handler):
+    """Renvoie les avertissements de pyaarlo dans le Journal d'Homotic.
+
+    pyaarlo ne lève jamais d'exception sur un appel raté : il écrit dans son
+    propre logger, puis rend la main comme si de rien n'était. Sans ce pont,
+    la seule trace exploitable d'un « request-error=… » ou d'un « error in
+    new response=… » restait invisible depuis l'application — et c'est
+    précisément ce qui manquait pour comprendre « failed to read active
+    mode ».
+    """
+
+    def emit(self, record):
+        try:
+            texte = record.getMessage()[:300]
+        except Exception:
+            return
+        maintenant = time_mod.monotonic()
+        # Anti-inondation : un même message n'est écrit qu'une fois par
+        # minute. Une session définitivement morte produit le même message à
+        # chaque appel ; sans ce garde-fou, le Journal deviendrait illisible
+        # et la base grossirait pour rien.
+        identique = texte == _dernier_echo["texte"]
+        if identique and maintenant - _dernier_echo["quand"] < 60:
+            _dernier_echo["repetitions"] += 1
+            return
+        ignorees = _dernier_echo["repetitions"] if identique else 0
+        _dernier_echo.update({"texte": texte, "quand": maintenant, "repetitions": 0})
+        suffixe = f" (+{ignorees} identiques dans la minute écoulée)" if ignorees else ""
+        niveau = LogEntry.ERROR if record.levelno >= logging.ERROR else LogEntry.WARNING
+        try:
+            journal(f"pyaarlo : {texte}{suffixe}", module=MODULE, level=niveau)
+        except Exception:
+            pass  # journaliser ne doit jamais casser un appel Arlo
+
+
+def _brancher_logger_pyaarlo():
+    """Branche l'écho une fois pour toutes (appelé à chaque connexion)."""
+    global _logger_branche
+    if _logger_branche:
+        return
+    logger = logging.getLogger("pyaarlo")
+    logger.addHandler(_EchoPyaarlo(level=logging.WARNING))
+    # Ne pas descendre plus bas que WARNING : en debug, pyaarlo écrit le
+    # contenu des requêtes, jetons compris.
+    if logger.level == logging.NOTSET or logger.level > logging.WARNING:
+        logger.setLevel(logging.WARNING)
+    _logger_branche = True
+
+
 def _construire():
     """Crée le client pyaarlo. Bloquant, et long : jamais dans une requête."""
     import os
 
     import pyaarlo
+
+    _brancher_logger_pyaarlo()
 
     identifiant, mot_de_passe = identifiants()
     if not identifiant or not mot_de_passe:
@@ -502,6 +562,62 @@ def changer_mode(code):
     except Exception:
         pass
     return MODES[code]
+
+
+def diagnostic():
+    """Sonde les appels Arlo un par un et journalise le résultat.
+
+    pyaarlo jette le code HTTP : `be.get()` rend `None` aussi bien pour un
+    401 que pour un 403, un corps inattendu ou une exception. On refait donc
+    les appels par `_request_tuple()`, qui rend le couple (code, corps).
+
+    Quatre sondes, choisies pour se répondre l'une à l'autre :
+
+    - `session` et `devices` : des points d'entrée classiques. S'ils
+      passent, la session est vivante et le problème est circonscrit.
+    - `activeMode` avec puis sans les en-têtes ajoutés par pyaarlo
+      (`x-forwarded-user`, `x-user-device-id`, construits à partir de
+      `be.user_id`) : si seule la version « avec » échoue, l'en-tête est en
+      cause — un `user_id` absent suffit à faire lever `requests`.
+    """
+    from pyaarlo.constant import (
+        DEVICES_PATH,
+        LOCATION_ACTIVEMODE_PATH_FORMAT,
+        SESSION_PATH,
+    )
+
+    client = _exiger_client()
+    lieu = _emplacement(client)
+    be = client.be
+
+    identifiant_utilisateur = getattr(be, "user_id", None)
+    lignes = [
+        f"is_connected={client.is_connected}",
+        "user_id=" + ("absent" if not identifiant_utilisateur
+                      else f"présent ({len(str(identifiant_utilisateur))} car.)"),
+        f"emplacement={lieu.name} ({lieu.device_id})",
+        f"mode en mémoire={lieu.mode}",
+    ]
+
+    def sonde(nom, chemin, entetes=None):
+        try:
+            code, corps = be._request_tuple(chemin, method="GET",
+                                            headers=dict(entetes or {}))
+        except Exception as exc:
+            lignes.append(f"{nom} → exception {type(exc).__name__} : {exc}")
+            return
+        forme = "corps vide" if corps is None else type(corps).__name__
+        lignes.append(f"{nom} → HTTP {code}, {forme}")
+
+    sonde("session", SESSION_PATH)
+    sonde("devices", DEVICES_PATH)
+    chemin_mode = LOCATION_ACTIVEMODE_PATH_FORMAT.format(lieu.device_id)
+    sonde("activeMode avec en-têtes", chemin_mode, lieu._extra_headers())
+    sonde("activeMode sans en-têtes", chemin_mode)
+
+    texte = " | ".join(lignes)
+    journal(f"Diagnostic Arlo — {texte}", module=MODULE, level=LogEntry.WARNING)
+    return texte
 
 
 def photo(camera_id=None, attente=45):

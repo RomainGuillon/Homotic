@@ -248,6 +248,13 @@
               <button class="btn btn-outline-light btn-sm">Se déconnecter</button>
             </form>
           {% endif %}
+          {% if connecte %}
+            <form method="post" class="mb-0">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="diag">
+              <button class="btn btn-outline-info btn-sm">Diagnostic</button>
+            </form>
+          {% endif %}
           <form method="post" class="mb-0">
             {% csrf_token %}
             <input type="hidden" name="action" value="oublier">
