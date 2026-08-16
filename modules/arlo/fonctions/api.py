@@ -51,8 +51,10 @@ ATTENTE_CODE_S = 300
 PAS_ATTENTE_S = 3
 
 # Arlo confirme un changement de mode de façon asynchrone : on lui laisse ce
-# délai avant de relire, sinon le cache repartirait sur l'ancien mode.
+# délai avant de relire, sinon le cache repartirait sur l'ancien mode. La
+# confirmation peut tarder, d'où plusieurs relectures avant de conclure.
 ATTENTE_CONFIRMATION_S = 4
+ESSAIS_CONFIRMATION = 2
 
 # États de connexion, tels qu'affichés par l'onglet.
 DECONNECTE = "deconnecte"
@@ -407,23 +409,94 @@ def mode_courant():
 # Actions
 # ----------------------------------------------------------------------
 
+def _libelle(code):
+    """Libellé d'un mode, y compris quand Arlo en renvoie un inattendu."""
+    return MODES.get(code, f"mode inconnu ({code or '?'})")
+
+
+def _relire_mode(lieu):
+    """Mode réellement en vigueur, relu chez Arlo — jamais celui en mémoire.
+
+    Cette lecture rafraîchit du même coup le numéro de révision que pyaarlo
+    joint au prochain changement de mode. C'est le point capital : une
+    révision périmée fait rejeter le changement par Arlo, et le setter de
+    pyaarlo se contente alors d'un message dans son propre logger avant de
+    sortir — sans rien lever. Vu d'ici, l'action semblait réussie.
+
+    Sur échec de lecture, on rend la valeur en mémoire : mieux vaut une
+    valeur douteuse, qui sera démentie par la vérification, que pas de
+    valeur du tout.
+    """
+    try:
+        lieu.update_mode()
+    except Exception as exc:
+        journal(f"Lecture du mode Arlo impossible : {exc}",
+                module=MODULE, level=LogEntry.WARNING)
+    return lieu.mode
+
+
 def changer_mode(code):
-    """Bascule l'emplacement dans le mode demandé. Renvoie le libellé."""
+    """Bascule l'emplacement dans le mode demandé. Renvoie le libellé.
+
+    Trois précautions, chacune payée d'une panne muette le 2026-08-16 :
+
+    1. **Relire l'état réel avant de décider.** Le mode gardé en mémoire
+       peut dater d'heures (changement fait depuis l'application Arlo, flux
+       d'événements interrompu). Un scénario concluait « déjà en veille » et
+       n'envoyait rien, alors que les caméras étaient armées.
+    2. **Réessayer une fois.** Le premier PUT peut partir avec une révision
+       périmée ; la relecture de l'étape 1 en fournit une fraîche.
+    3. **Vérifier que le mode a pris**, et refuser bruyamment sinon. Le
+       Journal affichait « Mode caméras -> En absence » pour une action qui
+       n'avait rien fait.
+    """
     if code not in MODES:
         raise ErreurArlo(f"Mode inconnu : {code}")
     client = _exiger_client()
     lieu = _emplacement(client)
 
-    if lieu.mode == code:
+    avant = _relire_mode(lieu)
+    if avant == code:
         return f"Déjà {MODES[code].lower()}"
 
-    lieu.mode = code
-    time_mod.sleep(ATTENTE_CONFIRMATION_S)
-    try:
-        lieu.update_mode()
-    except Exception:
-        pass
-    journal(f"Mode caméras -> {MODES[code]}", module=MODULE)
+    obtenu = avant
+    for tentative in (1, 2):
+        lieu.mode = code
+        for _ in range(ESSAIS_CONFIRMATION):
+            time_mod.sleep(ATTENTE_CONFIRMATION_S)
+            obtenu = _relire_mode(lieu)
+            if obtenu == code:
+                break
+        if obtenu == code:
+            break
+        if tentative == 1:
+            journal(
+                f"Arlo n'a pas appliqué « {MODES[code]} » "
+                f"(toujours « {_libelle(obtenu)} ») — seconde tentative",
+                module=MODULE, level=LogEntry.WARNING,
+            )
+
+    if obtenu != code:
+        raison = (getattr(client, "last_error", "") or "").strip()
+        detail = f" — dernière erreur Arlo : {raison}" if raison else ""
+        journal(
+            f"Changement de mode refusé sur « {lieu.name} » : "
+            f"« {MODES[code]} » demandé, toujours « {_libelle(obtenu)} »{detail}",
+            module=MODULE, level=LogEntry.ERROR,
+        )
+        try:
+            collecter()
+        except Exception:
+            pass
+        raise ErreurArlo(
+            f"Arlo n'a pas appliqué le mode « {MODES[code]} » "
+            f"(toujours « {_libelle(obtenu)} »){detail}"
+        )
+
+    # L'emplacement est nommé : si l'application Arlo montre autre chose,
+    # c'est qu'on pilote le mauvais emplacement, et la ligne le dira.
+    journal(f"Mode caméras sur « {lieu.name} » : "
+            f"{_libelle(avant)} -> {MODES[code]}", module=MODULE)
     try:
         collecter()
     except Exception:
