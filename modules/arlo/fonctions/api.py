@@ -70,6 +70,7 @@ _fil_connexion = None          # fil de la connexion en cours
 _fil_photo = None              # fil de l'instantané en cours
 _derniere_tentative = 0.0      # monotonic() de la dernière reconnexion tentée
 _echecs_consecutifs = 0        # espace les tentatives quand ça ne repart pas
+_sondes_ratees = 0             # lectures de contrôle infructueuses d'affilée
 
 # Attente avant une nouvelle tentative de reconnexion, doublée à chaque
 # échec consécutif et plafonnée. Sans cet espacement, une session
@@ -80,6 +81,12 @@ _echecs_consecutifs = 0        # espace les tentatives quand ça ne repart pas
 # en gardant une reprise rapide sur une coupure passagère.
 DELAI_RETENTE_S = 900
 DELAI_RETENTE_MAX_S = 4 * 3600
+
+# Une sonde qui échoue sans dire pourquoi (5xx, coupure réseau, Arlo qui
+# tousse) ne prouve rien : on ne déclare la session morte qu'après trois
+# échecs d'affilée, soit un quart d'heure au rythme de la tâche. Un 401 ou
+# un 403, lui, est sans appel et compte immédiatement.
+SONDES_RATEES_MAX = 3
 
 
 class ErreurArlo(RuntimeError):
@@ -291,7 +298,7 @@ def _construire():
 
 def _connecter():
     """Corps du fil de connexion."""
-    global _client, _derniere_tentative, _echecs_consecutifs
+    global _client, _derniere_tentative, _echecs_consecutifs, _sondes_ratees
     try:
         _poser_etat(EN_COURS, "Connexion à Arlo en cours…")
         arlo = _construire()
@@ -306,6 +313,7 @@ def _connecter():
     # avec le délai le plus court.
     _derniere_tentative = 0.0
     _echecs_consecutifs = 0
+    _sondes_ratees = 0
     _poser_etat(CONNECTE, "")
     journal("Connecté à Arlo", module=MODULE)
     try:
@@ -548,6 +556,12 @@ def changer_mode(code):
             collecter()
         except Exception:
             pass
+        # Une action qui échoue est le meilleur indice d'une session morte :
+        # on contrôle tout de suite plutôt que d'attendre la tâche des cinq
+        # minutes, pour que le scénario suivant ait une chance d'aboutir.
+        if not client_vivant():
+            deconnecter()
+            _tenter_reconnexion()
         raise ErreurArlo(
             f"Arlo n'a pas appliqué le mode « {MODES[code]} » "
             f"(toujours « {_libelle(obtenu)} »){detail}"
@@ -677,20 +691,64 @@ def photo_en_cours():
 # ----------------------------------------------------------------------
 
 def client_vivant():
-    """Le client en mémoire répond-il encore ?
+    """Le client en mémoire répond-il encore ? Preuve par un appel réel.
 
-    Un jeton expiré laisse derrière lui un objet qui a l'air normal mais
-    dont toutes les requêtes échouent. Sans ce contrôle, la tâche
-    continuerait de le tenir pour bon et ne se reconnecterait jamais.
+    `client.is_connected` ne vaut que `backend._logged_in` : un drapeau posé
+    à la connexion, remis à zéro seulement si le fil d'événements de pyaarlo
+    remarque la coupure. Le 2026-08-16 il est resté à `True` pendant des
+    heures alors que tous les appels revenaient vides : le module se croyait
+    connecté, les scénarios agissaient dans le vide, et il a fallu
+    redémarrer le service à la main. **Un drapeau n'est pas une preuve de
+    vie.**
+
+    On interroge donc la liste des appareils — l'appel le plus banal du
+    compte — et on lit le code HTTP, que `be.get()` jette. Coût : une
+    requête toutes les cinq minutes, et Arlo n'impose pas de quota.
     """
+    global _sondes_ratees
+
     with _verrou:
         client = _client
     if client is None:
         return False
+
     try:
-        return bool(client.is_connected)
-    except Exception:
+        if not client.is_connected:
+            return False
+
+        from pyaarlo.constant import DEVICES_PATH
+
+        sonde = getattr(getattr(client, "be", None), "_request_tuple", None)
+        if sonde is None:
+            # pyaarlo a changé : on se rabat sur le drapeau plutôt que de
+            # déclarer morte une session sans doute vivante — une boucle de
+            # reconnexion ferait bien plus de dégâts qu'un doute.
+            return True
+
+        code, _corps = sonde(DEVICES_PATH, method="GET")
+    except Exception as exc:
+        journal(f"Contrôle de la session Arlo impossible : {exc}",
+                module=MODULE, level=LogEntry.WARNING)
+        return True  # ne rien conclure d'un incident local
+
+    if code == 200:
+        _sondes_ratees = 0
+        return True
+
+    if code in (401, 403):
+        _sondes_ratees = 0
+        journal(f"Session Arlo refusée (HTTP {code}) — reconnexion nécessaire",
+                module=MODULE, level=LogEntry.WARNING)
         return False
+
+    _sondes_ratees += 1
+    journal(f"Contrôle de la session Arlo : HTTP {code} "
+            f"({_sondes_ratees}/{SONDES_RATEES_MAX})",
+            module=MODULE, level=LogEntry.WARNING)
+    if _sondes_ratees >= SONDES_RATEES_MAX:
+        _sondes_ratees = 0
+        return False
+    return True
 
 
 def delai_retente():
