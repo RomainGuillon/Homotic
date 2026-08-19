@@ -1,3 +1,10 @@
+# Copyright (c) 2026 Romain Guillon
+#
+# Distribué sous licence MIT. Vous pouvez utiliser, modifier et
+# redistribuer ce fichier, y compris commercialement, à condition de
+# conserver la présente mention de copyright.
+# Voir le fichier LICENSE à la racine du dépôt.
+
 """Bloc Chauffe-eau du tableau de bord (présentation v1 : mini ballon +
 douches + température + pastilles chauffe/boost)."""
 

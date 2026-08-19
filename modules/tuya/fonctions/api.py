@@ -1,3 +1,10 @@
+# Copyright (c) 2026 Romain Guillon
+#
+# Distribué sous licence MIT. Vous pouvez utiliser, modifier et
+# redistribuer ce fichier, y compris commercialement, à condition de
+# conserver la présente mention de copyright.
+# Voir le fichier LICENSE à la racine du dépôt.
+
 """API Cloud Tuya : capteurs température/humidité et prises connectées.
 
 Repris de la v1 (tuya/tuya_client_v2.py + sensors.py), adapté :

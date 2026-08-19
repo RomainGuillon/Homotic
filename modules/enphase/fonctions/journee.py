@@ -1,3 +1,10 @@
+# Copyright (c) 2026 Romain Guillon
+#
+# Distribué sous licence MIT. Vous pouvez utiliser, modifier et
+# redistribuer ce fichier, y compris commercialement, à condition de
+# conserver la présente mention de copyright.
+# Voir le fichier LICENSE à la racine du dépôt.
+
 """Cumuls et coût de la journée (repris de la v1 web/services.py).
 
 - ``energy_snapshot()`` : instantané local (Envoy) + cumuls du jour remplacés

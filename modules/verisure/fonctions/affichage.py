@@ -1,3 +1,10 @@
+# Copyright (c) 2026 Romain Guillon
+#
+# Distribué sous licence MIT. Vous pouvez utiliser, modifier et
+# redistribuer ce fichier, y compris commercialement, à condition de
+# conserver la présente mention de copyright.
+# Voir le fichier LICENSE à la racine du dépôt.
+
 """Fonctions d'affichage du module Alarme : bouclier coloré selon l'état.
 
 Convention de couleur : vert = la maison est protégée, ambre = protection

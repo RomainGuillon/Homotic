@@ -1,3 +1,10 @@
+# Copyright (c) 2026 Romain Guillon
+#
+# Distribué sous licence MIT. Vous pouvez utiliser, modifier et
+# redistribuer ce fichier, y compris commercialement, à condition de
+# conserver la présente mention de copyright.
+# Voir le fichier LICENSE à la racine du dépôt.
+
 """Diagramme en bâtons de la journée (production / consommation / réseau).
 
 Lecture — chaque côté de l'axe est un **empilement**, et les deux racontent

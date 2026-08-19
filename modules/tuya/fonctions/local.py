@@ -1,3 +1,10 @@
+# Copyright (c) 2026 Romain Guillon
+#
+# Distribué sous licence MIT. Vous pouvez utiliser, modifier et
+# redistribuer ce fichier, y compris commercialement, à condition de
+# conserver la présente mention de copyright.
+# Voir le fichier LICENSE à la racine du dépôt.
+
 """Appareils Tuya lus et pilotés sur le réseau local, sans passer par le cloud.
 
 Pourquoi ce module existe : l'API Cloud de Tuya est plafonnée (voir l'en-tête

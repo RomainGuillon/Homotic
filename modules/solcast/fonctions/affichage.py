@@ -1,3 +1,10 @@
+# Copyright (c) 2026 Romain Guillon
+#
+# Distribué sous licence MIT. Vous pouvez utiliser, modifier et
+# redistribuer ce fichier, y compris commercialement, à condition de
+# conserver la présente mention de copyright.
+# Voir le fichier LICENSE à la racine du dépôt.
+
 """Affichage du module Solaire : courbe SVG d'une journée (aire de
 prévision ambre, zone verte du créneau de chauffe, ligne bleue du réel),
 grille pointillée et valeurs au survol — présentation reprise de la v1."""

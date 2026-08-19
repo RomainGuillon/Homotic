@@ -107,4 +107,33 @@ n'est requis pour faire tourner le socle.
 
 ## Licence
 
-[MIT](LICENSE) — Romain Guillon.
+**Copyright (c) 2026 Romain Guillon — Tous droits réservés.**
+
+Ce dépôt est publié en **accès visible (*source-available*)** : le code est
+consultable pour évaluer mon travail, mais il **n'est pas open source**.
+
+|  | Autorisé | Interdit |
+|---|---|---|
+| **Lire le code** | ✅ | |
+| **Exécuter la démo en ligne** | ✅ | |
+| **Lancer le projet en local pour l'essayer** | ✅ | |
+| **Copier tout ou partie du code** | | ❌ |
+| **Modifier / créer une œuvre dérivée** | | ❌ |
+| **Redistribuer / republier** | | ❌ |
+| **Usage commercial ou en production** | | ❌ |
+| **Entraîner un modèle d'IA dessus** | | ❌ |
+
+Conditions complètes : [`LICENSE`](./LICENSE) — mentions et contact :
+[`NOTICE.md`](./NOTICE.md).
+
+> Ce projet vous intéresse pour un usage professionnel ? Une **licence
+> commerciale** et un accompagnement à l'intégration sont disponibles.
+> Écrivez-moi, c'est le plus simple.
+
+---
+
+**English —** This repository is *source-available*, not open source. You may
+read the code and run the demo; you may not copy, modify, redistribute or use
+it commercially. See [`LICENSE`](./LICENSE). Commercial licensing available on
+request.
+

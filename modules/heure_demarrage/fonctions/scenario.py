@@ -1,3 +1,10 @@
+# Copyright (c) 2026 Romain Guillon
+#
+# Distribué sous licence MIT. Vous pouvez utiliser, modifier et
+# redistribuer ce fichier, y compris commercialement, à condition de
+# conserver la présente mention de copyright.
+# Voir le fichier LICENSE à la racine du dépôt.
+
 """Fonctions d'ACTION du module Heure de démarrage (contrat SCENARIO).
 
 Permettent de relancer le calcul depuis un scénario, par exemple juste

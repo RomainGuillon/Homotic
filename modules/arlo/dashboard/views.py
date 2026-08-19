@@ -1,3 +1,10 @@
+# Copyright (c) 2026 Romain Guillon
+#
+# Distribué sous licence MIT. Vous pouvez utiliser, modifier et
+# redistribuer ce fichier, y compris commercialement, à condition de
+# conserver la présente mention de copyright.
+# Voir le fichier LICENSE à la racine du dépôt.
+
 """Bloc Caméras du tableau de bord : le mode de surveillance, d'un coup d'œil.
 
 Pas d'image ici, volontairement : la vignette Arlo est lourde, elle pousse les

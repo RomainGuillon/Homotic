@@ -1,3 +1,10 @@
+# Copyright (c) 2026 Romain Guillon
+#
+# Distribué sous licence MIT. Vous pouvez utiliser, modifier et
+# redistribuer ce fichier, y compris commercialement, à condition de
+# conserver la présente mention de copyright.
+# Voir le fichier LICENSE à la racine du dépôt.
+
 """Bloc Alarme du tableau de bord : bouclier, état, date du changement.
 
 Le bloc passe par le même cache que l'onglet : afficher le tableau de bord ne

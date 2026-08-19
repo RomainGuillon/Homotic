@@ -1,3 +1,10 @@
+# Copyright (c) 2026 Romain Guillon
+#
+# Distribué sous licence MIT. Vous pouvez utiliser, modifier et
+# redistribuer ce fichier, y compris commercialement, à condition de
+# conserver la présente mention de copyright.
+# Voir le fichier LICENSE à la racine du dépôt.
+
 """Passerelle Enphase Envoy (locale) : production, consommation, flux réseau.
 
 Repris de la v1 (enphase/energy.py), adapté : configuration, token JWT et

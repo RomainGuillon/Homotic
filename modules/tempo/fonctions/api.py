@@ -1,3 +1,10 @@
+# Copyright (c) 2026 Romain Guillon
+#
+# Distribué sous licence MIT. Vous pouvez utiliser, modifier et
+# redistribuer ce fichier, y compris commercialement, à condition de
+# conserver la présente mention de copyright.
+# Voir le fichier LICENSE à la racine du dépôt.
+
 """Accès à l'API RTE Tempo — identifiants et tarifs lus en base.
 
 Le « jour Tempo » court de 6h à 6h : sur une journée calendaire,

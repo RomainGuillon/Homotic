@@ -1,3 +1,10 @@
+# Copyright (c) 2026 Romain Guillon
+#
+# Distribué sous licence MIT. Vous pouvez utiliser, modifier et
+# redistribuer ce fichier, y compris commercialement, à condition de
+# conserver la présente mention de copyright.
+# Voir le fichier LICENSE à la racine du dépôt.
+
 """Calcul de la meilleure heure de démarrage du chauffe-eau.
 
 Durée de chauffe : temp_chauffe_ete (1 h par défaut) ou temp_chauffe_hiver

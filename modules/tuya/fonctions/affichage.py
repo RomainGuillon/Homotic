@@ -1,3 +1,10 @@
+# Copyright (c) 2026 Romain Guillon
+#
+# Distribué sous licence MIT. Vous pouvez utiliser, modifier et
+# redistribuer ce fichier, y compris commercialement, à condition de
+# conserver la présente mention de copyright.
+# Voir le fichier LICENSE à la racine du dépôt.
+
 """Fonctions d'affichage du module Tuya : jauges capteur (thermomètre +
 goutte d'humidité) et dessin de prise — reprises de la v1 (web/charts.py)."""
 

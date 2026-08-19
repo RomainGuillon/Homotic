@@ -1,3 +1,10 @@
+# Copyright (c) 2026 Romain Guillon
+#
+# Distribué sous licence MIT. Vous pouvez utiliser, modifier et
+# redistribuer ce fichier, y compris commercialement, à condition de
+# conserver la présente mention de copyright.
+# Voir le fichier LICENSE à la racine du dépôt.
+
 """API Verisure France (Securitas Direct) — lecture de l'état de l'alarme.
 
 Module volontairement **en lecture seule** : aucune fonction d'armement ni de
