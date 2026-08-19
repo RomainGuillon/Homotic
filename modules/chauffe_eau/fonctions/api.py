@@ -10,6 +10,21 @@
 Repris de la v1 (Chauffe_eau/heater.py + functions.py), adapté :
 identifiants et réglages lus en base (module « chauffe_eau »), cache du
 statut en base avec repli sur la dernière valeur connue.
+
+Économie d'appels — trois principes, dans l'ordre où ils agissent :
+
+1. le cache en base (voir ``get_status_cached``) : toutes les lectures du
+   module, y compris les conditions de scénario, passent par lui. Leur
+   fréquence n'a donc aucun effet sur le nombre de requêtes envoyées ;
+2. l'URL de l'appareil est mémorisée : ``get_setup()``, qui renvoie
+   l'installation entière, n'est appelé qu'à la première connexion ou si
+   l'URL retenue ne répond plus ;
+3. la tâche « actualiser » ne force un relevé que si le suivi est arrêté,
+   pour ne pas relire ce que celui-ci vient de lire.
+
+Reste un défaut connu : chaque relevé ouvre une session et se
+réauthentifie. Overkiz tolère mal les connexions répétées — c'est le
+prochain chantier (session persistante), pas encore traité ici.
 """
 
 import asyncio
@@ -159,41 +174,108 @@ def _get_water_heater(setup):
     return None
 
 
-async def _fetch_status(user, pwd):
+# ----------------------------------------------------------------------
+# Appareil mémorisé
+# ----------------------------------------------------------------------
+#
+# L'URL Overkiz d'un équipement ne change pas — sauf ré-appairage du ballon.
+# La retrouver coûtait pourtant un « get_setup() » à chaque relevé, soit
+# l'installation entière rapatriée pour en extraire une chaîne connue
+# d'avance, environ 300 fois par jour. On la retient donc en base, et on ne
+# redécouvre que si elle manque ou si elle ne répond plus.
+
+def _appareil_memorise():
+    """(url, libellé) retenus lors d'une découverte précédente.
+
+    À appeler AVANT le code async : l'ORM Django est interdit dans une
+    boucle asyncio (même raison que ``_require_credentials``).
+    """
+    return (
+        get_setting("device_url", module=MODULE, default="") or None,
+        get_setting("device_label", module=MODULE, default="") or None,
+    )
+
+
+def _memoriser_appareil(url, libelle):
+    """Enregistre l'appareil découvert, si la valeur a changé."""
+    if url and url != get_setting("device_url", module=MODULE, default=""):
+        set_setting("device_url", url, module=MODULE)
+    if libelle and libelle != get_setting("device_label", module=MODULE, default=""):
+        set_setting("device_label", libelle, module=MODULE)
+
+
+async def _decouvrir(client):
+    """Cherche le ballon dans l'installation. Retourne (url, libellé)."""
+    setup = await client.get_setup()
+    water = _get_water_heater(setup)
+    if water is None:
+        raise RuntimeError("Chauffe-eau introuvable sur le compte Cozytouch")
+    return water.device_url, water.label
+
+
+async def _fetch_status(user, pwd, device_url=None):
     client = _make_client(user, pwd)
     async with client:
         await client.login()
-        setup = await client.get_setup()
-        water = _get_water_heater(setup)
-        if water is None:
-            raise RuntimeError("Chauffe-eau introuvable sur le compte Cozytouch")
-        states = await client.get_state(water.device_url)
+        libelle, states = None, None
+        if device_url:
+            try:
+                states = await client.get_state(device_url)
+            except Exception:
+                # URL périmée, ou lecture ratée : on retombe sur la
+                # découverte complète plutôt que d'échouer. Le module se
+                # répare donc tout seul si le ballon est ré-appairé.
+                states = None
+        if not states:
+            device_url, libelle = await _decouvrir(client)
+            states = await client.get_state(device_url)
         raw = {s.name: str(s.value) for s in states}
-        return {"label": water.label, "device_url": water.device_url, "raw": raw}
+        return {"label": libelle, "device_url": device_url, "raw": raw}
 
 
 def get_status():
     user, pwd = _require_credentials()
-    result = asyncio.run(_fetch_status(user, pwd))
+    url, libelle = _appareil_memorise()  # avant l'async : lecture en base
+    result = asyncio.run(_fetch_status(user, pwd, url))
+    if not result.get("label"):
+        result["label"] = libelle
+    _memoriser_appareil(result.get("device_url"), result.get("label"))
     result.update(_summarize(result["raw"]))  # hors async : lit v40_max en base
     return result
 
 
-async def _execute(user, pwd, commands, label):
+async def _execute(user, pwd, commands, label, device_url=None):
     from pyoverkiz.models import Action, Command
 
     client = _make_client(user, pwd)
     async with client:
         await client.login()
-        setup = await client.get_setup()
-        water = _get_water_heater(setup)
-        if water is None:
-            raise RuntimeError("Chauffe-eau introuvable")
+        decouvert = None
+        if not device_url:
+            device_url, decouvert = await _decouvrir(client)
         action = Action(
-            device_url=water.device_url,
+            device_url=device_url,
             commands=[Command(name=n, parameters=p) for n, p in commands],
         )
-        return await client.execute_action_group(actions=[action], label=label)
+        await client.execute_action_group(actions=[action], label=label)
+        return device_url, decouvert
+
+
+def _lancer(commands, label):
+    """Envoie des commandes au ballon, en réutilisant l'URL mémorisée."""
+    user, pwd = _require_credentials()
+    url, libelle = _appareil_memorise()
+    try:
+        url, decouvert = asyncio.run(_execute(user, pwd, commands, label, url))
+    except Exception:
+        if not url:
+            raise
+        # L'URL mémorisée ne répond plus : une seule nouvelle tentative, en
+        # redécouvrant l'appareil. Les commandes envoyées ici règlent une
+        # consigne (nombre de douches, mode boost) : les rejouer donne le
+        # même résultat, un doublon éventuel est donc sans conséquence.
+        url, decouvert = asyncio.run(_execute(user, pwd, commands, label, None))
+    _memoriser_appareil(url, decouvert or libelle)
 
 
 def douches_chauffe():
@@ -218,8 +300,7 @@ def douches_veille():
 def set_showers(n):
     """Règle le nombre de douches souhaité (1..5)."""
     n = max(1, min(int(n), 5))
-    user, pwd = _require_credentials()
-    asyncio.run(_execute(user, pwd, [("setExpectedNumberOfShower", [n])], "Set shower count"))
+    _lancer([("setExpectedNumberOfShower", [n])], "Set shower count")
     journal(f"Nombre de douches souhaité : {n}", module=MODULE)
     _refresh_after_command()
     return n
@@ -229,8 +310,7 @@ def set_boost_mode(mode):
     """Active/désactive le boost : "on", "off" ou "prog"."""
     if mode not in ("on", "off", "prog"):
         raise ValueError("mode doit être 'on', 'off' ou 'prog'")
-    user, pwd = _require_credentials()
-    asyncio.run(_execute(user, pwd, [("setBoostMode", [mode])], f"boost={mode}"))
+    _lancer([("setBoostMode", [mode])], f"boost={mode}")
     journal(f"Boost : {mode}", module=MODULE)
     _refresh_after_command()
     return mode
@@ -279,7 +359,23 @@ def get_status_cached(force=False, ttl_minutes=15):
 
 
 def tache_actualiser():
-    """Tâche périodique (scheduler) : rafraîchit le statut du ballon."""
+    """Tâche périodique (scheduler) : rafraîchit le statut du ballon.
+
+    Le forçage n'a lieu que si le suivi des chauffes est arrêté. Quand il
+    tourne, il a relu le ballon moins de « suivi_minutes_veille » minutes
+    plus tôt : forcer ici relirait ce qui vient de l'être, au prix d'une
+    authentification Overkiz complète, une centaine de fois par jour.
+
+    Sans forçage, l'appel reste un filet : il rafraîchit quand même si le
+    cache a dépassé son délai normal. Un suivi en panne ne fige donc pas
+    les mesures.
+    """
     if not configured():
         return
-    get_status_cached(force=True)
+    try:
+        from .suivi import actif as suivi_actif
+
+        suivi_tourne = suivi_actif()
+    except Exception:
+        suivi_tourne = False
+    get_status_cached(force=not suivi_tourne)
