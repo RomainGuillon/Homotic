@@ -37,7 +37,6 @@ Le logiciel est libre ; le temps ne l'est pas. Je peux intervenir sur :
 - **Formation et transfert de compétences** — prise en main du contrat de
   module et de l'éditeur de scénarios par vos équipes.
 
-<!-- À COMPLÉTER : URL de votre profil -->
 **Contact — LinkedIn :** http://www.linkedin.com/in/romain-guillon-data
 
 **GitHub :** https://github.com/RomainGuillon

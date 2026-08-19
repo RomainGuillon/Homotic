@@ -107,33 +107,20 @@ n'est requis pour faire tourner le socle.
 
 ## Licence
 
-**Copyright (c) 2026 Romain Guillon — Tous droits réservés.**
+[MIT](LICENSE) — Copyright (c) 2026 Romain Guillon.
 
-Ce dépôt est publié en **accès visible (*source-available*)** : le code est
-consultable pour évaluer mon travail, mais il **n'est pas open source**.
+Homotic est un logiciel libre. Vous pouvez l'utiliser, le modifier, le
+redistribuer et le commercialiser. La seule obligation est de conserver la
+mention de copyright dans les copies et les travaux dérivés.
 
-|  | Autorisé | Interdit |
-|---|---|---|
-| **Lire le code** | ✅ | |
-| **Exécuter la démo en ligne** | ✅ | |
-| **Lancer le projet en local pour l'essayer** | ✅ | |
-| **Copier tout ou partie du code** | | ❌ |
-| **Modifier / créer une œuvre dérivée** | | ❌ |
-| **Redistribuer / republier** | | ❌ |
-| **Usage commercial ou en production** | | ❌ |
-| **Entraîner un modèle d'IA dessus** | | ❌ |
+Mentions complètes, contributions, composants tiers et sécurité :
+[`NOTICE.md`](NOTICE.md).
 
-Conditions complètes : [`LICENSE`](./LICENSE) — mentions et contact :
-[`NOTICE.md`](./NOTICE.md).
+> **Besoin d'un module sur mesure, d'une mise en production ou d'une
+> adaptation professionnelle ?** Le logiciel est libre, l'accompagnement est
+> une prestation — voir [`NOTICE.md`](NOTICE.md).
 
-> Ce projet vous intéresse pour un usage professionnel ? Une **licence
-> commerciale** et un accompagnement à l'intégration sont disponibles.
-> Écrivez-moi, c'est le plus simple.
-
----
-
-**English —** This repository is *source-available*, not open source. You may
-read the code and run the demo; you may not copy, modify, redistribute or use
-it commercially. See [`LICENSE`](./LICENSE). Commercial licensing available on
-request.
-
+**English —** Homotic is free software under the MIT license. Use, modify,
+redistribute and sell it freely; just keep the copyright notice. Custom
+modules, deployment and professional adaptation available as paid services —
+see [`NOTICE.md`](NOTICE.md).
