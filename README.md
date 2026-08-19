@@ -4,6 +4,12 @@ Tableau de bord domestique modulaire, écrit en Django. Il réunit les mesures
 de la maison en direct, un éditeur de scénarios d'automatisation, et pilote
 les consommations selon la production solaire et les tarifs EDF.
 
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
+![Django](https://img.shields.io/badge/Django-5.1%2B-092E20)
+![Modules](https://img.shields.io/badge/modules%20livr%C3%A9s-9-0A7EA4)
+![Auto-hébergé](https://img.shields.io/badge/auto--h%C3%A9berg%C3%A9-aucun%20cloud%20requis-2E7D32)
+[![Licence MIT](https://img.shields.io/badge/licence-MIT-1E88E5)](LICENSE)
+
 ![Tableau de bord](docs/images/03-tableau-de-bord.png)
 
 L'idée directrice : **le socle ne connaît aucun équipement**. Ajouter une
