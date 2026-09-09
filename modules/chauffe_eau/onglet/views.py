@@ -36,6 +36,15 @@ def _save_params(request):
     except ValueError:
         pass
 
+    # Cadence du suivi des chauffes hors chauffe. C'est elle qui relit
+    # réellement le ballon en tâche de fond quand le suivi est actif : la
+    # laisser invisible rendait la période d'actualisation trompeuse.
+    raw = request.POST.get("suivi_minutes_veille", "").strip()
+    try:
+        set_setting("suivi_minutes_veille", str(max(1, int(raw))), module=api.MODULE)
+    except ValueError:
+        pass
+
     for champ in ("douches_chauffe", "douches_veille"):
         raw = request.POST.get(champ, "").strip()
         try:
@@ -146,6 +155,7 @@ def onglet(request):
             "has_password": bool(get_setting("password", module=api.MODULE, default="")),
             "v40_max": int(api.v40_max()),
             "tache_minutes": get_setting("tache_actualiser_minutes", module=api.MODULE, default="15"),
+            "suivi_minutes_veille": get_setting("suivi_minutes_veille", module=api.MODULE, default="5"),
             "douches_chauffe": api.douches_chauffe(),
             "douches_veille": api.douches_veille(),
             "mode_absence": get_setting("mode_absence", module=api.MODULE, default=""),

@@ -343,8 +343,20 @@
             <div class="col-6 col-md-3">
               <label class="form-label">Rafraîchir toutes les… (min)</label>
               <input type="number" name="tache_actualiser_minutes" class="form-control" min="0" value="{{ params.tache_minutes }}">
-              <div class="form-text">Lecture automatique en arrière-plan, sans ouvrir l'onglet.
-                <strong>0 = jamais</strong>. Pris en compte au prochain démarrage.</div>
+              <div class="form-text">Tâche de fond : demande à la passerelle de repousser
+                l'état du ballon, et fixe l'âge maximal des données affichées.
+                <strong>0 = jamais</strong>. La cadence de la tâche n'est prise en compte
+                qu'au prochain démarrage du service ; l'âge maximal, lui, s'applique
+                tout de suite.</div>
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label">Suivi — relevé en veille (min)</label>
+              <input type="number" name="suivi_minutes_veille" class="form-control" min="1"
+                     value="{{ params.suivi_minutes_veille }}">
+              <div class="form-text">Quand le suivi des chauffes tourne, c'est
+                <em>lui</em> qui relit le ballon hors chauffe, à cette cadence — inutile
+                de descendre l'âge maximal en dessous. Pendant une chauffe, le relevé
+                passe à la minute quoi qu'il arrive.</div>
             </div>
           </div>
           <div class="row g-3 mb-4">

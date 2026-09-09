@@ -64,6 +64,24 @@ def configured():
     return bool(user and pwd)
 
 
+def periode_actualisation():
+    """Période d'actualisation réglée, en minutes (15 par défaut).
+
+    Elle sert deux fois : à cadencer la tâche de fond (lu au démarrage par
+    le scheduler), et comme **durée de validité du cache**. Sans ce second
+    usage, régler 2 minutes ne changeait rien à ce qu'on voit : les pages
+    lisaient un cache valable 15 minutes.
+
+    0 signifie « pas de tâche de fond » ; pour le cache, on retombe alors
+    sur 15 minutes plutôt que de ne jamais expirer.
+    """
+    try:
+        valeur = int(get_setting("tache_actualiser_minutes", module=MODULE, default=15))
+    except (TypeError, ValueError):
+        return 15
+    return valeur if valeur > 0 else 15
+
+
 def v40_max():
     """Volume d'eau à 40°C d'un ballon « plein » (litres), pour le %."""
     raw = get_setting("v40_max", module=MODULE)
@@ -1010,13 +1028,19 @@ def _suivre_absence(data, precedent=None):
 # Cache en base (même principe que le module tempo)
 # ----------------------------------------------------------------------
 
-def get_status_cached(force=False, ttl_minutes=15, rafraichir=False):
+def get_status_cached(force=False, ttl_minutes=None, rafraichir=False):
     """Statut du ballon : (data, ts, erreur). Sert le cache périmé si l'API tombe.
+
+    ``ttl_minutes`` non précisé suit la période d'actualisation réglée dans
+    le module : c'est ce qui fait qu'y mettre 2 minutes se voit vraiment à
+    l'écran. Le suivi des chauffes, lui, impose la sienne.
 
     ``rafraichir`` demande d'abord à la passerelle de repousser l'état réel
     de l'appareil (voir ``_rafraichir``) : indispensable pour voir un
     réglage fait ailleurs, mais c'est un appel de plus.
     """
+    if ttl_minutes is None:
+        ttl_minutes = periode_actualisation()
     now = datetime.now()
     raw = get_setting("cache_status", module=MODULE)
     cached_data, cached_ts = None, None
