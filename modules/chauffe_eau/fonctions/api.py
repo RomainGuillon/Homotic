@@ -290,24 +290,59 @@ def is_heating(value):
     return str(value or "").lower() in ("on", "heating", "true", "1")
 
 
-def is_absence(data):
-    """Vrai si le ballon est effectivement en absence *maintenant*.
+def _signature_periode(data):
+    """Les deux dates d'absence, sous forme de repère comparable."""
+    data = data or {}
+    return f"{data.get('absence_debut') or ''}|{data.get('absence_fin') or ''}"
 
-    Le mode seul ne suffit pas : les dates restent inscrites dans la
-    passerelle après le retour, et le mode « prog » désigne une absence
-    programmée, pas forcément commencée.
+
+def etat_absence(data):
+    """Ce que le ballon dit de l'absence — en croisant le mode ET les dates.
+
+    Aucun des deux signaux ne suffit seul, et c'est tout le piège :
+
+    - le **mode** reste « off » tant que la date de départ n'est pas
+      atteinte. Une absence programmée depuis l'application Cozytouch
+      n'apparaîtrait donc nulle part dans Homotic si l'on ne regardait que
+      lui (constaté le 2026-09-09) ;
+    - les **dates** restent inscrites dans la passerelle après le retour,
+      et après une annulation : à elles seules, elles ressusciteraient une
+      absence qu'on vient d'annuler.
+
+    On retient donc une absence si le mode est actif, ou si la période
+    court encore et n'est pas celle qu'Homotic a annulée — repère gardé en
+    réglage ``absence_annulee``.
+
+    Retourne un dictionnaire : mode, debut, fin, retenue, en_cours, a_venir.
     """
     data = data or {}
-    if str(data.get("absence") or "").lower() in ("", "off", "none"):
-        return False
-    debut = parse_iso(data.get("absence_debut"))
-    fin = parse_iso(data.get("absence_fin"))
+    mode = str(data.get("absence") or "").lower()
+    mode_actif = mode not in ("", "off", "none")
+    debut, fin = parse_iso(data.get("absence_debut")), parse_iso(data.get("absence_fin"))
     maintenant = datetime.now()
-    if debut and maintenant < debut:
-        return False
-    if fin and maintenant >= fin:
-        return False
-    return True
+
+    annulee = _signature_periode(data) == get_setting(
+        "absence_annulee", module=MODULE, default=None
+    )
+    periode_en_cours = bool(fin and fin > maintenant and not annulee)
+
+    retenue = mode_actif or periode_en_cours
+    en_cours = retenue and (debut is None or debut <= maintenant) and (
+        fin is None or fin > maintenant
+    )
+    return {
+        "mode": data.get("absence"),
+        "debut": debut,
+        "fin": fin,
+        "retenue": retenue,
+        "en_cours": en_cours,
+        "a_venir": bool(retenue and debut and debut > maintenant),
+    }
+
+
+def is_absence(data):
+    """Vrai si le ballon est en absence *maintenant* (voir ``etat_absence``)."""
+    return etat_absence(data)["en_cours"]
 
 
 def parse_iso(texte):
@@ -642,6 +677,10 @@ def set_absence(depart="maintenant", retour=""):
         )
 
     mode = mode_absence_actif()
+    # Une nouvelle absence efface le repère d'annulation : sans cela,
+    # reprogrammer exactement la période qu'on venait d'annuler resterait
+    # invisible (voir etat_absence).
+    set_setting("absence_annulee", "", module=MODULE)
     _lancer(dates + [("setAbsenceMode", [mode])], "absence")
     journal(
         f"Absence programmée du {debut:%d/%m/%Y %H:%M} au {fin:%d/%m/%Y %H:%M} "
@@ -685,6 +724,11 @@ def arreter_absence():
         _lancer([("setAbsenceMode", ["off"])], "absence off")
     journal("Absence annulée", module=MODULE)
     _refresh_after_command()
+    # Les dates survivent à l'annulation dans la passerelle : on note
+    # laquelle a été annulée, pour ne pas la reprendre pour une absence
+    # à venir (voir etat_absence).
+    data, _ts, _err = get_status_cached()
+    set_setting("absence_annulee", _signature_periode(data), module=MODULE)
     return "absence annulée"
 
 
@@ -707,15 +751,24 @@ def _refresh_after_command():
         _RELECTURE_APRES_COMMANDE = False
 
 
-def _suivre_absence(data):
+def _etats_absence(data):
+    """Les états bruts qui parlent d'absence, pour comparer deux relevés."""
+    raw = (data or {}).get("raw") or {}
+    return {n: str(v) for n, v in raw.items() if "absence" in n.lower()}
+
+
+def _suivre_absence(data, precedent=None):
     """Signale au Journal un changement d'absence venu d'ailleurs.
 
     L'absence se règle aussi depuis l'application Cozytouch, et le ballon
     la termine tout seul à la date de retour. Homotic lit le même état :
     ces changements arrivent donc bien jusqu'ici, mais silencieusement, au
-    rythme du cache (quelques minutes). Une ligne de journal les rend
-    visibles sans coûter le moindre appel — on compare deux lectures déjà
-    faites.
+    rythme du cache. Une ligne de journal les rend visibles sans coûter le
+    moindre appel — on compare deux lectures déjà faites.
+
+    La ligne nomme les **états bruts** qui ont bougé, et pas seulement le
+    résumé : c'est ce qui permet de comprendre ce que fait réellement
+    l'application Cozytouch quand elle programme une absence.
     """
     signature = "|".join(
         str(data.get(cle) or "") for cle in ("absence", "absence_debut", "absence_fin")
@@ -727,14 +780,25 @@ def _suivre_absence(data):
     if connue is None or _RELECTURE_APRES_COMMANDE:
         return  # première lecture (on pose le repère), ou notre propre commande
 
-    debut, fin = parse_iso(data.get("absence_debut")), parse_iso(data.get("absence_fin"))
-    if is_absence(data):
+    etat = etat_absence(data)
+    debut, fin = etat["debut"], etat["fin"]
+    if etat["en_cours"]:
         detail = f"en cours jusqu'au {fin:%d/%m/%Y %H:%M}" if fin else "en cours"
-    elif str(data.get("absence") or "").lower() not in ("", "off", "none") and debut:
+    elif etat["retenue"] and debut:
         detail = f"programmée du {debut:%d/%m/%Y %H:%M} au {fin:%d/%m/%Y %H:%M}"
     else:
         detail = "terminée ou annulée"
-    journal(f"Absence {detail} (changement relevé sur le ballon)", module=MODULE)
+
+    avant, apres = _etats_absence(precedent), _etats_absence(data)
+    changes = [
+        f"{nom} : {avant.get(nom, '—')} → {valeur}"
+        for nom, valeur in apres.items()
+        if avant.get(nom) != valeur
+    ]
+    message = f"Absence {detail} (changement relevé sur le ballon)"
+    if changes:
+        message += " — " + " ; ".join(changes)
+    journal(message, module=MODULE)
 
 
 # ----------------------------------------------------------------------
@@ -768,7 +832,7 @@ def get_status_cached(force=False, ttl_minutes=15):
 
     set_setting("cache_status", json.dumps({"ts": now.isoformat(), "data": data}), module=MODULE)
     try:
-        _suivre_absence(data)
+        _suivre_absence(data, cached_data)
     except Exception:
         pass  # un journal manquant ne doit jamais faire échouer un relevé
     return data, now, ""

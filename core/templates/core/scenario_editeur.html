@@ -356,11 +356,28 @@ function renderFnParams(sel, saved = {}) {
   if (!box) return;
   const f = DATA.fonctions[parseInt(sel.value, 10)];
   const defs = (f && f.params) || [];
+
+  // Une valeur enregistrée absente de sa liste tomberait sans bruit sur la
+  // première option — et changerait le sens du scénario à la prochaine
+  // sauvegarde. Si un champ libre dépend de cette liste, on l'y rabat :
+  // une date écrite avant que la liste n'existe redevient « Date précise ».
+  const saisi = Object.assign({}, saved);
+  defs.forEach(p => {
+    if (!p.options || !p.options.length) return;
+    const v = saisi[p.nom];
+    if (!v || p.options.some(o => String(o[0]) === String(v))) return;
+    const libre = defs.find(q => q.depend && q.depend[p.nom] !== undefined && !q.options);
+    if (!libre) return;
+    saisi[libre.nom] = v;
+    saisi[p.nom] = libre.depend[p.nom];
+  });
+
   box.innerHTML = defs.map(p => {
-    let val = saved[p.nom] !== undefined ? saved[p.nom] : (p.defaut || '');
+    let val = saisi[p.nom] !== undefined ? saisi[p.nom] : (p.defaut || '');
     let champ;
     if (p.options && p.options.length) {
-      champ = `<select class="form-select form-select-sm w-auto" data-param="${p.nom}">
+      champ = `<select class="form-select form-select-sm w-auto" data-param="${p.nom}"
+         onchange="onParamChange(this)">
          ${p.options.map(o => opt(o[0], o[1], val)).join('')}</select>`;
     } else {
       const types = { nombre: 'number', date: 'datetime-local', jour: 'date', heure: 'time' };
@@ -373,13 +390,44 @@ function renderFnParams(sel, saved = {}) {
       if (motifs[p.type] && val && !motifs[p.type].test(val)) val = '';
       champ = `<input type="${types[p.type] || 'text'}" data-param="${p.nom}"
          class="form-control form-control-sm" style="width:${p.largeur || 180}px"
+         onchange="onParamChange(this)"
          value="${esc(val)}" placeholder="${esc(p.placeholder)}" title="${esc(p.placeholder)}">`;
     }
     // Libellé et champ dans le même conteneur : sans cela, une ligne trop
     // étroite renvoie le libellé d'un côté et son champ de l'autre.
-    return `<span class="d-inline-flex gap-1 align-items-center">
+    return `<span class="d-inline-flex gap-1 align-items-center"
+       data-param-wrap="${p.nom}">
        <span class="small text-secondary">${p.label}</span>${champ}</span>`;
   }).join('');
+  majDependances(box);
+}
+
+/* Un paramètre peut n'avoir de sens que selon la valeur d'un autre :
+   « depend: {depart_jour: "date"} » ne l'affiche que si le paramètre
+   « depart_jour » vaut « date ». C'est ce qui permet une liste « Aujourd'hui
+   / Demain / … / Date précise » suivie du calendrier, sans montrer un
+   calendrier inutile le reste du temps.
+
+   Masquage par style et non par classe ou attribut : « d-inline-flex »
+   l'emporterait sur « d-none » comme sur « hidden ». */
+function majDependances(box) {
+  const sel = box.parentNode.querySelector('[data-field="fonction_idx"]');
+  const f = sel ? DATA.fonctions[parseInt(sel.value, 10)] : null;
+  const defs = (f && f.params) || [];
+  const valeurs = {};
+  box.querySelectorAll('[data-param]').forEach(el => { valeurs[el.dataset.param] = el.value; });
+  defs.forEach(p => {
+    if (!p.depend) return;
+    const wrap = box.querySelector(`[data-param-wrap="${p.nom}"]`);
+    if (!wrap) return;
+    const visible = Object.entries(p.depend).every(([nom, attendu]) => valeurs[nom] === attendu);
+    wrap.style.display = visible ? '' : 'none';
+  });
+}
+/* Rappelée à chaque changement : le champ dépendant apparaît sans recharger. */
+function onParamChange(el) {
+  const box = el.closest('[data-params-box]');
+  if (box) majDependances(box);
 }
 function initFnParams(row, data) {
   const sel = row.querySelector('[data-field="fonction_idx"]');
@@ -626,7 +674,13 @@ function collectRow(r) {
   const pbox = r.querySelector(':scope > [data-params-box]');
   if (pbox) {
     const params = {};
-    pbox.querySelectorAll('[data-param]').forEach(el => { params[el.dataset.param] = el.value; });
+    pbox.querySelectorAll('[data-param]').forEach(el => {
+      // Un champ masqué par une dépendance ne fait pas partie du choix :
+      // enregistrer la date d'un « Aujourd'hui » la ferait ressurgir.
+      const wrap = el.closest('[data-param-wrap]');
+      if (wrap && wrap.style.display === 'none') return;
+      params[el.dataset.param] = el.value;
+    });
     if (Object.keys(params).length) item.params = params;
   }
   return item;

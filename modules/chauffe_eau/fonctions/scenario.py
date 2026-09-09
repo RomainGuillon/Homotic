@@ -43,37 +43,58 @@ def boost_prog():
     return api.set_boost_mode("prog")
 
 
-def absence(depart_jour="", depart_heure="", retour_jour="", retour_heure="",
+def _jour(choix, date_precise):
+    """Traduit le choix de jour en quelque chose que le module comprend.
+
+    « Aujourd'hui » vaut une chaîne vide (le jour d'exécution), « Dans 3
+    jours » vaut « +3j », et « Date précise… » renvoie au calendrier du
+    champ voisin. Une date reçue directement dans le choix est acceptée
+    telle quelle : les scénarios enregistrés avant la liste déroulante
+    continuent de fonctionner.
+    """
+    choix = str(choix or "").strip()
+    if choix == "date":
+        return str(date_precise or "").strip()
+    return choix
+
+
+def absence(depart_jour="", depart_date="", depart_heure="",
+            retour_jour="", retour_date="", retour_heure="",
             depart="", retour=""):
     """Programme une absence entre deux dates.
 
-    Chaque moment se saisit en deux champs : un jour et une heure. Le
-    **jour laissé vide vaut le jour où le scénario s'exécute** — c'est ce
-    qui permet d'écrire « départ aujourd'hui à 18 h » dans un scénario qui
-    rejouera demain à l'identique. Renseigner le jour fixe une date
-    précise.
+    Chaque moment se saisit en deux temps : un jour, choisi **relativement
+    au jour d'exécution** (« Aujourd'hui », « Demain », « Dans 5
+    jours »…), et une heure. C'est ce qui permet d'écrire « départ
+    aujourd'hui à 18 h » dans un scénario qui rejouera la semaine
+    prochaine à l'identique — une date figée au calendrier ne vaudrait que
+    la première fois. « Date précise… » ouvre le calendrier pour les
+    absences ponctuelles.
 
     Deux commodités :
 
-    - départ entièrement vide = au moment de l'exécution ;
-    - retour sans jour dont l'heure tombe avant le départ = le **prochain**
-      passage à cette heure, donc le lendemain. « Je pars ce soir 22 h,
-      retour 7 h » veut dire 7 h demain, pas 7 h ce matin.
+    - départ « Aujourd'hui » sans heure = au moment de l'exécution ;
+    - retour « Aujourd'hui » dont l'heure tombe avant le départ = le
+      **prochain** passage à cette heure, donc le lendemain. « Je pars ce
+      soir 22 h, retour 7 h » veut dire 7 h demain, pas 7 h ce matin.
 
-    Un retour vide reste une erreur : une absence sans fin laisserait le
-    ballon froid indéfiniment.
+    Un retour sans heure ni jour reste une erreur : une absence sans fin
+    laisserait le ballon froid indéfiniment.
 
     ``depart`` et ``retour`` acceptent encore un texte complet
     (« 20/09/2026 18:00 », « maintenant », « +7j 18:00 ») : les scénarios
-    écrits avant les deux champs continuent de fonctionner.
+    écrits avant ces champs continuent de fonctionner.
     """
+    jour_depart = _jour(depart_jour, depart_date)
+    jour_retour = _jour(retour_jour, retour_date)
+
     debut = api.parse_moment(depart) if depart else api.moment_jour_heure(
-        depart_jour, depart_heure
+        jour_depart, depart_heure
     )
     fin = api.parse_moment(retour) if retour else api.moment_jour_heure(
-        retour_jour, retour_heure
+        jour_retour, retour_heure
     )
-    if fin and debut and fin <= debut and not retour and not str(retour_jour or "").strip():
+    if fin and debut and fin <= debut and not retour and not jour_retour:
         fin += timedelta(days=1)
     return api.set_absence(debut or "maintenant", fin)
 

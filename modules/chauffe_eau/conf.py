@@ -35,6 +35,40 @@ BESOINS = [
     },
 ]
 
+# Choix de jour proposés pour l'absence. Les valeurs sont celles que
+# comprend « api.parse_moment » : vide = le jour où le scénario s'exécute,
+# « +3j » = trois jours plus tard, « date » = la date choisie au calendrier
+# dans le champ voisin.
+_JOURS_ABSENCE = (
+    [["", "Aujourd'hui"], ["+1j", "Demain"]]
+    + [[f"+{n}j", f"Dans {n} jours"] for n in range(2, 8)]
+    + [["+14j", "Dans 14 jours"], ["+21j", "Dans 21 jours"], ["+30j", "Dans 30 jours"],
+       ["date", "Date précise…"]]
+)
+
+
+def _params_absence():
+    """Quatre champs : jour et heure du départ, jour et heure du retour.
+
+    Chaque jour est une liste relative au jour d'exécution, doublée d'un
+    calendrier qui n'apparaît que sur « Date précise… ».
+    """
+    champs = []
+    for cle, libelle, aide in (
+        ("depart", "Départ", "Vide = l'heure d'exécution"),
+        ("retour", "Retour", "Heure de retour"),
+    ):
+        champs += [
+            {"nom": f"{cle}_jour", "label": libelle, "options": _JOURS_ABSENCE},
+            {"nom": f"{cle}_date", "label": "le", "type": "jour", "largeur": 150,
+             "depend": {f"{cle}_jour": "date"},
+             "placeholder": "Date choisie au calendrier"},
+            {"nom": f"{cle}_heure", "label": "à", "type": "heure", "largeur": 105,
+             "placeholder": aide},
+        ]
+    return champs
+
+
 # Fonctions SIMPLES exposées aux scénarios : une fonction par action possible.
 SCENARIO = [
     {"nom": "chauffer", "fonction": "fonctions.scenario.chauffer",
@@ -49,18 +83,11 @@ SCENARIO = [
      "description": "Boost en mode programme"},
     {"nom": "absence", "fonction": "fonctions.scenario.absence",
      "description": "Programme une absence (départ et retour)",
-     # Jour et heure séparés : un jour vide vaut le jour où le scénario
-     # s'exécute, ce qu'aucun sélecteur date-heure ne sait exprimer.
-     "params": [
-         {"nom": "depart_jour", "label": "Départ", "type": "jour", "largeur": 150,
-          "placeholder": "Vide = le jour où le scénario s'exécute"},
-         {"nom": "depart_heure", "label": "à", "type": "heure", "largeur": 105,
-          "placeholder": "Vide = l'heure d'exécution"},
-         {"nom": "retour_jour", "label": "Retour", "type": "jour", "largeur": 150,
-          "placeholder": "Vide = le jour de l'exécution, ou le lendemain si l'heure est déjà passée"},
-         {"nom": "retour_heure", "label": "à", "type": "heure", "largeur": 105,
-          "placeholder": "Heure de retour"},
-     ]},
+     # Le jour se choisit dans une liste RELATIVE au jour d'exécution
+     # (« Aujourd'hui », « Dans 3 jours »…), parce qu'un scénario rejoue :
+     # une date figée au calendrier ne vaudrait que la première fois. Le
+     # calendrier n'apparaît que sur « Date précise ».
+     "params": _params_absence()},
     {"nom": "absence_off", "fonction": "fonctions.scenario.absence_off",
      "description": "Annule l'absence en cours ou programmée"},
 ] + [

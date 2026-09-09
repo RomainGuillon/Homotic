@@ -260,38 +260,49 @@ la passerelle après coup — d'où la distinction entre l'info `absence` (le
 mode déclaré par le ballon) et `absence_active` (**on** seulement si
 l'absence est en cours maintenant).
 
-En scénario, l'action **absence** prend quatre champs : un jour et une heure
-pour le départ, un jour et une heure pour le retour. **Un jour laissé vide
-vaut le jour où le scénario s'exécute** — c'est ce qui permet d'écrire
-« départ aujourd'hui à 18 h » dans un scénario qui rejouera demain à
-l'identique. Renseigner le jour fixe une date précise.
+En scénario, l'action **absence** demande un jour et une heure pour le
+départ, un jour et une heure pour le retour. Le jour se choisit **par
+rapport au jour d'exécution** — « Aujourd'hui », « Demain », « Dans 5
+jours » — parce qu'un scénario rejoue : une date figée au calendrier ne
+vaudrait que la première fois. « Date précise… » fait apparaître un
+calendrier, pour une absence ponctuelle.
 
 Deux commodités :
 
-- départ entièrement vide = au moment de l'exécution ;
-- retour sans jour dont l'heure tombe avant le départ = le **prochain**
-  passage à cette heure, donc le lendemain. « Je pars ce soir 22 h, retour
-  7 h » veut dire 7 h demain, pas 7 h ce matin.
+- départ « Aujourd'hui » sans heure = au moment de l'exécution ;
+- retour « Aujourd'hui » dont l'heure tombe avant le départ = le
+  **prochain** passage à cette heure, donc le lendemain. « Je pars ce soir
+  22 h, retour 7 h » veut dire 7 h demain, pas 7 h ce matin.
 
 L'action **absence_off** annule l'absence. Un retour vide est refusé : une
 absence sans fin laisserait le ballon froid indéfiniment.
 
 Le module comprend aussi les écritures textuelles `maintenant`,
 `20/09/2026 18:00`, `+7j 18:00`, `+12h`, `+90m` : les scénarios écrits avant
-les champs jour/heure continuent donc de fonctionner.
+ces champs continuent donc de fonctionner.
 
 ### L'absence réglée ailleurs
 
-L'absence peut être posée depuis l'application Cozytouch, et le ballon la
+L'absence se pose aussi depuis l'application Cozytouch, et le ballon la
 termine seul à la date de retour. Homotic lit le même état : ces changements
-remontent donc, mais au rythme du cache du module — jusqu'à quelques minutes.
-Le bouton **Actualiser** de l'onglet force la lecture, et chaque changement
-d'absence constaté sur le ballon donne une ligne dans le Journal.
+remontent donc, au rythme du cache du module — quelques minutes, ou tout de
+suite avec le bouton **Actualiser**. Chaque changement constaté donne une
+ligne dans le Journal, avec les états bruts qui ont bougé.
 
-Le mode fait foi, pas les dates : elles restent inscrites dans la passerelle
-après le retour comme après une annulation. C'est pourquoi l'onglet
-n'affiche « aucune absence » qu'en regardant le mode, et pourquoi la
-condition à utiliser est `absence_active`.
+Attention à la lecture de cet état : **ni le mode ni les dates ne suffisent
+seuls**.
+
+- Le mode (`modbuslink:DHWAbsenceModeState`) reste à `off` tant que la date
+  de départ n'est pas atteinte. Une absence programmée pour la semaine
+  prochaine, depuis l'application, n'apparaîtrait donc nulle part si l'on ne
+  regardait que lui.
+- Les dates restent inscrites dans la passerelle après le retour, et après
+  une annulation. Seules, elles ressusciteraient une absence qu'on vient
+  d'annuler.
+
+Le module croise les deux, et retient la période annulée pour ne pas la
+reprendre pour une absence à venir. En condition de scénario, utiliser
+`absence_active` — jamais `absence`, qui n'est que le mode brut.
 
 > Les noms de commandes et les valeurs du mode absence varient d'un modèle à
 > l'autre. Le module les lit **une fois** dans la définition de l'appareil et

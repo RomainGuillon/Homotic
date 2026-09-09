@@ -56,26 +56,22 @@ def _save_params(request):
 def _contexte_absence(data):
     """État de l'absence + valeurs pré-remplies du formulaire.
 
-    Les dates restent inscrites dans la passerelle après le retour, et
-    après une annulation : elles ne disent donc rien à elles seules. C'est
-    le **mode** qui fait foi — sans lui, la pastille « Absence prévue »
-    survivait à l'annulation. Les dates ne servent qu'à pré-remplir le
-    formulaire, où reproposer la dernière période saisie est commode.
+    L'état lui-même vient de ``api.etat_absence``, qui croise le mode et
+    les dates — aucun des deux ne suffisant seul. Ici on n'ajoute que les
+    valeurs pré-remplies du formulaire : reproposer la dernière période
+    encore à venir est commode, même si elle a été annulée.
     """
     maintenant = datetime.now().replace(second=0, microsecond=0)
-    debut = api.parse_iso(data.get("absence_debut"))
-    fin = api.parse_iso(data.get("absence_fin"))
-    en_cours = api.is_absence(data)
-    mode_actif = str(data.get("absence") or "").lower() not in ("", "off", "none")
-    a_venir = bool(mode_actif and fin and fin > maintenant and not en_cours)
+    etat = api.etat_absence(data)
+    debut, fin = etat["debut"], etat["fin"]
     return {
-        "absence_on": en_cours,
-        "absence_mode": data.get("absence"),
+        "absence_on": etat["en_cours"],
+        "absence_mode": etat["mode"],
         "absence_debut": debut,
         "absence_fin": fin,
-        "absence_a_venir": a_venir,
+        "absence_a_venir": etat["a_venir"],
         # Y a-t-il quelque chose à annuler ? (en cours, ou programmé)
-        "absence_annulable": bool(mode_actif),
+        "absence_annulable": etat["retenue"],
         "form_depart": ((debut if fin and fin > maintenant else None) or maintenant).strftime("%Y-%m-%dT%H:%M"),
         "form_retour": ((fin if fin and fin > maintenant else None) or maintenant + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M"),
     }

@@ -89,16 +89,31 @@ Un paramètre qui déclare des `options` devient une **liste déroulante**. Sans
 | `type` | `texte` (défaut), `nombre`, `jour` (sélecteur de date), `heure`, `date` (sélecteur date-heure) |
 | `defaut` | Valeur pré-remplie à la création de l'action |
 | `placeholder` | Exemple affiché dans le champ vide, et en infobulle |
-| `largeur` | Largeur maxi du champ, en pixels (180 par défaut) |
+| `largeur` | Largeur du champ, en pixels (180 par défaut) |
+| `depend` | `{"autre_param": "valeur"}` — le champ n'apparaît que si l'autre paramètre vaut cette valeur, et n'est pas enregistré tant qu'il est masqué |
 
 > Une saisie libre arrive toujours en **texte**. La fonction du module
 > l'interprète elle-même et lève une exception claire si elle n'y arrive
 > pas : le moteur l'écrit alors dans le Journal et arrête le scénario.
 
-Pour un instant, préférer **deux paramètres** — un `jour` et une `heure` —
-à un seul `date`. Un scénario rejoue : « aujourd'hui à 18 h » n'est
-exprimable que si le jour peut rester vide, ce qu'un sélecteur date-heure
-ne permet pas. L'action `absence` du module chauffe-eau en est l'exemple.
+Pour un instant, préférer une **liste de jours relatifs** (« Aujourd'hui »,
+« Demain », « Dans 3 jours ») accompagnée d'une `heure`, plutôt qu'un seul
+champ `date`. Un scénario rejoue : une date figée au calendrier ne vaut que
+la première fois. `depend` permet d'ajouter le calendrier pour les cas
+ponctuels, sans l'afficher le reste du temps :
+
+```python
+{"nom": "depart_jour", "label": "Départ", "options": [
+    ["", "Aujourd'hui"], ["+1j", "Demain"], ["date", "Date précise…"]]},
+{"nom": "depart_date", "label": "le", "type": "jour",
+ "depend": {"depart_jour": "date"}},
+{"nom": "depart_heure", "label": "à", "type": "heure"},
+```
+
+L'action `absence` du module chauffe-eau est bâtie ainsi. Une valeur
+enregistrée absente de la liste est rabattue sur le champ libre qui en
+dépend, plutôt que de retomber en silence sur la première option — un
+scénario écrit avant l'ajout de la liste garde donc son sens.
 
 Pour des entrées dynamiques (une action par prise, par climatisation…),
 construire la liste dans le module et l'exposer via une fonction :
