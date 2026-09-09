@@ -591,7 +591,13 @@ def set_boost_mode(mode):
 # de les deviner, on les lit UNE FOIS dans la définition de l'appareil et
 # on les mémorise : voir ``capacites()``.
 
-MODE_ABSENCE_DEFAUT = "prog"
+# Valeur envoyée à « setAbsenceMode » pour déclencher l'absence.
+#
+# « on », et non « prog » comme supposé au départ : relevé le 2026-09-09 sur
+# l'installation de Romain juste après une absence posée depuis
+# l'application Cozytouch — modbuslink:DHWAbsenceModeState valait « on ».
+# C'est donc ce que fait l'application elle-même.
+MODE_ABSENCE_DEFAUT = "on"
 
 
 async def _decouvrir_capacites(user, pwd):
@@ -669,8 +675,8 @@ def mode_absence_actif():
         modes = []
     if MODE_ABSENCE_DEFAUT in modes:
         return MODE_ABSENCE_DEFAUT
-    if "on" in modes:
-        return "on"
+    if "prog" in modes:  # modèle qui ne connaît que l'absence programmée
+        return "prog"
     return MODE_ABSENCE_DEFAUT
 
 
