@@ -74,6 +74,53 @@ def boost():
     return _status().get("boost")
 
 
+def absence():
+    """Mode absence déclaré par le ballon : off / prog / on."""
+    return _status().get("absence")
+
+
+def absence_active():
+    """« on » si l'absence est en cours *maintenant*, sinon « off ».
+
+    À préférer à « absence » en condition : les dates restent inscrites
+    dans la passerelle après le retour, et une absence programmée pour la
+    semaine prochaine n'est pas une absence en cours.
+    """
+    data = _status()
+    if not data:
+        return None
+    return "on" if api.is_absence(data) else "off"
+
+
+def absence_debut():
+    """Date de départ de l'absence (JJ/MM/AAAA HH:MM), vide si aucune."""
+    moment = api.parse_iso(_status().get("absence_debut"))
+    return moment.strftime("%d/%m/%Y %H:%M") if moment else ""
+
+
+def absence_fin():
+    """Date de retour de l'absence (JJ/MM/AAAA HH:MM), vide si aucune."""
+    moment = api.parse_iso(_status().get("absence_fin"))
+    return moment.strftime("%d/%m/%Y %H:%M") if moment else ""
+
+
+def absence_jours_restants():
+    """Jours avant le retour (décimal), ou None hors absence.
+
+    Utile en condition numérique : « relancer une chauffe quand il reste
+    moins de 0,5 jour avant le retour ».
+    """
+    from datetime import datetime
+
+    data = _status()
+    if not data or not api.is_absence(data):
+        return None
+    fin = api.parse_iso(data.get("absence_fin"))
+    if not fin:
+        return None
+    return round((fin - datetime.now()).total_seconds() / 86400, 2)
+
+
 INFOS = [
     {"nom": "temperature", "description": "Température du ballon (°C)"},
     {"nom": "consigne", "description": "Consigne (°C)"},
@@ -84,6 +131,11 @@ INFOS = [
     {"nom": "eau_chaude_litres", "description": "Eau chaude disponible (L)"},
     {"nom": "en_chauffe", "description": "En chauffe (on/off)"},
     {"nom": "boost", "description": "Boost (on/off/prog)"},
+    {"nom": "absence", "description": "Mode absence (off/prog/on)"},
+    {"nom": "absence_active", "description": "Absence en cours (on/off)"},
+    {"nom": "absence_debut", "description": "Absence — départ (JJ/MM/AAAA HH:MM)"},
+    {"nom": "absence_fin", "description": "Absence — retour (JJ/MM/AAAA HH:MM)"},
+    {"nom": "absence_jours_restants", "description": "Absence — jours avant le retour"},
 ]
 
 

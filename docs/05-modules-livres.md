@@ -250,3 +250,35 @@ Le chauffe-eau Atlantic n'a pas de commande « chauffer » directe : forcer
 une chauffe complète revient à régler le **nombre de douches souhaitées au
 maximum**, et revenir au fonctionnement normal à le remettre au minimum.
 C'est ce que font les fonctions `chauffer` et `eteindre`.
+
+### Absence
+
+La carte **Absence** de l'onglet reprend la fonction de l'application
+Cozytouch : deux dates, départ et retour. Le ballon cesse de chauffer entre
+les deux et reprend juste avant le retour. Les dates restent inscrites dans
+la passerelle après coup — d'où la distinction entre l'info `absence` (le
+mode déclaré par le ballon) et `absence_active` (**on** seulement si
+l'absence est en cours maintenant).
+
+En scénario, l'action **absence** prend les deux dates en paramètre. Trois
+écritures acceptées :
+
+| Écriture | Sens |
+| --- | --- |
+| `20/09/2026 18:00` | date fixe — absence ponctuelle |
+| `maintenant` | au moment où le scénario s'exécute |
+| `+7j 18:00` | dans 7 jours à 18 h (aussi `+12h`, `+90m`) |
+
+Les formes relatives sont les seules qui gardent un sens dans un scénario
+récurrent ou déclenché par un bouton : « je pars » → absence de maintenant
+à `+7j 18:00`. L'action **absence_off** annule l'absence en cours.
+
+Un retour vide est refusé : une absence sans fin laisserait le ballon froid
+indéfiniment.
+
+> Les noms de commandes et les valeurs du mode absence varient d'un modèle à
+> l'autre. Le module les lit **une fois** dans la définition de l'appareil et
+> les mémorise (bouton *Relire les capacités du ballon* dans le paramétrage).
+> Si le ballon reste malgré tout sur « off » après une programmation, le
+> Journal le signale et le réglage *Absence — valeur du mode* permet de
+> forcer `on` au lieu de `prog`.

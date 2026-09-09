@@ -88,6 +88,13 @@
               <i class="bi bi-fire me-1"></i>{% if heating_on %}En chauffe{% else %}Pas de chauffe{% endif %}</span>
             <span class="badge rounded-pill {% if boost_on %}text-bg-warning{% else %}text-bg-secondary{% endif %}">
               {% if boost_on %}Boost actif{% else %}{{ h.mode|default:"Mode inconnu" }}{% endif %}</span>
+            {% if absence_on %}
+              <span class="badge rounded-pill text-bg-info">
+                <i class="bi bi-suitcase me-1"></i>Absence jusqu'au {{ absence_fin|date:"d/m H:i" }}</span>
+            {% elif absence_a_venir %}
+              <span class="badge rounded-pill text-bg-secondary">
+                <i class="bi bi-suitcase me-1"></i>Absence prévue le {{ absence_debut|date:"d/m H:i" }}</span>
+            {% endif %}
           </div>
 
           <form method="post" class="mb-4">
@@ -115,6 +122,61 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  {# ---------- Absence ---------- #}
+  <div class="card mb-4">
+    <div class="card-header d-flex align-items-center justify-content-between">
+      <span><i class="bi bi-suitcase me-2"></i>Absence</span>
+      {% if absence_on %}
+        <span class="badge text-bg-info">en cours</span>
+      {% elif absence_a_venir %}
+        <span class="badge text-bg-secondary">programmée</span>
+      {% else %}
+        <span class="badge text-bg-secondary">aucune</span>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      <p class="text-secondary small">
+        Le ballon cesse de chauffer pendant la période et reprend juste avant le
+        retour — même fonction que dans l'application Cozytouch. Les deux dates
+        sont conservées par la passerelle, y compris après le retour.
+      </p>
+
+      {% if absence_debut or absence_fin %}
+        <p class="mb-3">
+          <span class="text-secondary small">Programmée dans le ballon :</span>
+          <strong>{{ absence_debut|date:"d/m/Y H:i"|default:"—" }}</strong>
+          <span class="text-secondary">→</span>
+          <strong>{{ absence_fin|date:"d/m/Y H:i"|default:"—" }}</strong>
+          <span class="text-faint small">(mode « {{ absence_mode|default:"?" }} »)</span>
+        </p>
+      {% endif %}
+
+      <form method="post" class="row g-2 align-items-end">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="absence">
+        <div class="col-12 col-md-4">
+          <label class="form-label">Départ</label>
+          <input type="datetime-local" name="depart" class="form-control" value="{{ form_depart }}">
+        </div>
+        <div class="col-12 col-md-4">
+          <label class="form-label">Retour</label>
+          <input type="datetime-local" name="retour" class="form-control" value="{{ form_retour }}">
+        </div>
+        <div class="col-12 col-md-4">
+          <button class="btn btn-primary">Programmer l'absence</button>
+        </div>
+      </form>
+
+      {% if absence_debut or absence_fin or absence_on %}
+        <form method="post" class="mt-3">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="absence_off">
+          <button class="btn btn-outline-secondary btn-sm">Annuler l'absence</button>
+        </form>
+      {% endif %}
     </div>
   </div>
 
@@ -184,7 +246,29 @@
                 « Chauffe mini » (1 par défaut).</div>
             </div>
           </div>
+          <div class="row g-3 mb-4">
+            <div class="col-12 col-md-4">
+              <label class="form-label">Absence — valeur du mode</label>
+              <select name="mode_absence" class="form-select">
+                <option value="" {% if not params.mode_absence %}selected{% endif %}>Automatique (ce que le ballon déclare)</option>
+                <option value="prog" {% if params.mode_absence == "prog" %}selected{% endif %}>prog</option>
+                <option value="on" {% if params.mode_absence == "on" %}selected{% endif %}>on</option>
+              </select>
+              <div class="form-text">Valeur envoyée à <code>setAbsenceMode</code>. À ne
+                changer que si l'absence programmée reste sur « off » côté ballon —
+                le Journal le signale.</div>
+            </div>
+          </div>
           <button class="btn btn-primary">Enregistrer</button>
+        </form>
+
+        <form method="post" class="mt-3">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="capacites">
+          <button class="btn btn-outline-secondary btn-sm">Relire les capacités du ballon</button>
+          <div class="form-text">Liste des commandes et des modes acceptés, relevée une
+            seule fois puis mémorisée.
+            {% if params.capacites %}<br><code class="small">{{ params.capacites|truncatechars:300 }}</code>{% endif %}</div>
         </form>
       </div>
     </div>

@@ -33,5 +33,7 @@ def bloc(request):
             "tank": affichage.tank_svg(data.get("hot_water_pct"), width=110),
             "heating_on": api.is_heating(data.get("heating")),
             "boost_on": str(data.get("boost", "")).lower() == "on",
+            "absence_on": api.is_absence(data),
+            "absence_fin": api.parse_iso(data.get("absence_fin")),
         },
     )

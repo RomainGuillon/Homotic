@@ -345,16 +345,29 @@ function conditionInnerBase(type, data = {}) {
            value="${esc(data.valeur)}" placeholder="valeur">`;
 }
 
+// Paramètres d'une action « fonction ». Un paramètre qui déclare des
+// « options » devient une liste déroulante ; sans options, c'est une
+// saisie libre (texte, nombre ou date-heure selon « type »), pour les
+// valeurs qu'aucune liste ne peut énumérer — une date, par exemple.
 function renderFnParams(sel, saved = {}) {
   const box = sel.parentNode.querySelector('[data-params-box]');
   if (!box) return;
   const f = DATA.fonctions[parseInt(sel.value, 10)];
   const defs = (f && f.params) || [];
-  box.innerHTML = defs.map(p =>
-    `<span class="small text-secondary">${p.label}</span>
-     <select class="form-select form-select-sm w-auto" data-param="${p.nom}">
-       ${p.options.map(o => opt(o[0], o[1], saved[p.nom] !== undefined ? saved[p.nom] : '')).join('')}
-     </select>`).join('');
+  box.innerHTML = defs.map(p => {
+    const val = saved[p.nom] !== undefined ? saved[p.nom] : (p.defaut || '');
+    let champ;
+    if (p.options && p.options.length) {
+      champ = `<select class="form-select form-select-sm w-auto" data-param="${p.nom}">
+         ${p.options.map(o => opt(o[0], o[1], val)).join('')}</select>`;
+    } else {
+      const types = { nombre: 'number', date: 'datetime-local', heure: 'time' };
+      champ = `<input type="${types[p.type] || 'text'}" data-param="${p.nom}"
+         class="form-control form-control-sm" style="max-width:${p.largeur || 180}px"
+         value="${esc(val)}" placeholder="${esc(p.placeholder)}" title="${esc(p.placeholder)}">`;
+    }
+    return `<span class="small text-secondary">${p.label}</span>${champ}`;
+  }).join('');
 }
 function initFnParams(row, data) {
   const sel = row.querySelector('[data-field="fonction_idx"]');

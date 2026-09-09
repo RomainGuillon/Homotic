@@ -7,6 +7,8 @@
 
 """Onglet Chauffe-eau : jauge + état/réglages + paramétrage (présentation v1)."""
 
+from datetime import datetime, timedelta
+
 from django.contrib import messages
 from django.shortcuts import redirect, render
 
@@ -41,8 +43,36 @@ def _save_params(request):
         except ValueError:
             pass
 
+    # Valeur de « setAbsenceMode » qui déclenche l'absence : vide = on suit
+    # ce que l'appareil déclare (voir api.mode_absence_actif).
+    mode = request.POST.get("mode_absence", "").strip().lower()
+    if mode in ("", "prog", "on"):
+        set_setting("mode_absence", mode, module=api.MODULE)
+
     journal("Paramètres mis à jour", module=api.MODULE)
     messages.success(request, "Paramètres chauffe-eau enregistrés.")
+
+
+def _contexte_absence(data):
+    """État de l'absence + valeurs pré-remplies du formulaire.
+
+    Les dates restent inscrites dans la passerelle après le retour : on ne
+    les repropose donc dans le formulaire que si l'absence est encore
+    devant nous. Sinon, proposition neutre : maintenant → dans 7 jours.
+    """
+    maintenant = datetime.now().replace(second=0, microsecond=0)
+    debut = api.parse_iso(data.get("absence_debut"))
+    fin = api.parse_iso(data.get("absence_fin"))
+    a_venir = bool(fin and fin > maintenant)
+    return {
+        "absence_on": api.is_absence(data),
+        "absence_mode": data.get("absence"),
+        "absence_debut": debut,
+        "absence_fin": fin,
+        "absence_a_venir": a_venir,
+        "form_depart": ((debut if a_venir else None) or maintenant).strftime("%Y-%m-%dT%H:%M"),
+        "form_retour": ((fin if a_venir else None) or maintenant + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M"),
+    }
 
 
 def onglet(request):
@@ -60,6 +90,22 @@ def onglet(request):
             elif action == "boost":
                 mode = api.set_boost_mode(request.POST.get("mode", "off"))
                 messages.success(request, f"Boost : {mode}.")
+            elif action == "absence":
+                resume = api.set_absence(
+                    request.POST.get("depart", ""), request.POST.get("retour", "")
+                )
+                messages.success(request, f"Absence programmée : {resume}.")
+            elif action == "absence_off":
+                api.arreter_absence()
+                messages.success(request, "Absence annulée.")
+            elif action == "capacites":
+                caps = api.capacites(force=True)
+                messages.success(
+                    request,
+                    f"{len(caps.get('commandes') or [])} commandes relevées ; "
+                    f"modes d'absence : "
+                    f"{', '.join(caps.get('modes_absence') or []) or 'non déclarés'}.",
+                )
         except Exception as exc:
             messages.error(request, f"Échec : {exc}")
         return redirect("core:module_tab", name="chauffe_eau")
@@ -82,6 +128,8 @@ def onglet(request):
             "tache_minutes": get_setting("tache_actualiser_minutes", module=api.MODULE, default="15"),
             "douches_chauffe": api.douches_chauffe(),
             "douches_veille": api.douches_veille(),
+            "mode_absence": get_setting("mode_absence", module=api.MODULE, default=""),
+            "capacites": get_setting("capacites", module=api.MODULE, default=""),
         },
     }
 
@@ -101,6 +149,7 @@ def onglet(request):
                 "default_showers": max(min_sh, min(max_sh, default_showers)),
             }
         )
+        context.update(_contexte_absence(data))
 
     # Suivi des chauffes : ne bloque jamais l'onglet si les tables du module
     # ne sont pas encore migrées.

@@ -68,11 +68,32 @@ SCENARIO = [
 ]
 ```
 
-- `params` est optionnel : chaque entrée devient une liste déroulante dans
-  l'éditeur, et sa valeur est passée à la fonction en **argument nommé**
+- `params` est optionnel : chaque entrée devient un champ dans l'éditeur, et
+  sa valeur est passée à la fonction en **argument nommé**
 - Une valeur vide n'est pas transmise, ce qui permet des « (inchangé) »
 - La valeur de retour est journalisée : renvoyer une chaîne courte décrivant
   ce qui a été fait est une bonne pratique
+
+Un paramètre qui déclare des `options` devient une **liste déroulante**. Sans
+`options`, c'est une **saisie libre** — pour ce qu'aucune liste ne peut
+énumérer, une date par exemple :
+
+```python
+{"nom": "retour", "label": "Retour", "type": "texte", "largeur": 200,
+ "defaut": "+7j 18:00", "placeholder": "27/09/2026 18:00"},
+```
+
+| Champ | Rôle |
+| --- | --- |
+| `options` | `[[valeur, libellé], …]` — présent ⇒ liste déroulante |
+| `type` | `texte` (défaut), `nombre`, `date` (sélecteur date-heure), `heure` |
+| `defaut` | Valeur pré-remplie à la création de l'action |
+| `placeholder` | Exemple affiché dans le champ vide, et en infobulle |
+| `largeur` | Largeur maxi du champ, en pixels (180 par défaut) |
+
+> Une saisie libre arrive toujours en **texte**. La fonction du module
+> l'interprète elle-même et lève une exception claire si elle n'y arrive
+> pas : le moteur l'écrit alors dans le Journal et arrête le scénario.
 
 Pour des entrées dynamiques (une action par prise, par climatisation…),
 construire la liste dans le module et l'exposer via une fonction :

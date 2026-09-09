@@ -41,6 +41,28 @@ def boost_prog():
     return api.set_boost_mode("prog")
 
 
+def absence(depart="maintenant", retour=""):
+    """Programme une absence entre deux dates.
+
+    Les deux champs se saisissent dans l'action du scénario. Trois
+    écritures acceptées (voir ``api.parse_moment``) :
+
+    - « 20/09/2026 18:00 » : date fixe, pour une absence ponctuelle ;
+    - « maintenant » : au moment où le scénario s'exécute ;
+    - « +7j 18:00 » : dans 7 jours à 18 h — la seule forme qui garde un
+      sens dans un scénario récurrent ou déclenché par un bouton.
+
+    Départ vide = maintenant. Retour vide = erreur : une absence sans
+    date de retour laisserait le ballon froid indéfiniment.
+    """
+    return api.set_absence(depart, retour)
+
+
+def absence_off():
+    """Annule l'absence en cours ou programmée."""
+    return api.arreter_absence()
+
+
 def __getattr__(name):
     """douches_1 .. douches_5 : règle le nombre de douches souhaité."""
     if name.startswith("douches_"):

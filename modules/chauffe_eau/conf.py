@@ -47,6 +47,17 @@ SCENARIO = [
      "description": "Arrête le mode boost"},
     {"nom": "boost_prog", "fonction": "fonctions.scenario.boost_prog",
      "description": "Boost en mode programme"},
+    {"nom": "absence", "fonction": "fonctions.scenario.absence",
+     "description": "Programme une absence (départ et retour)",
+     "params": [
+         {"nom": "depart", "label": "Départ", "type": "texte", "largeur": 200,
+          "defaut": "maintenant",
+          "placeholder": "maintenant / 20/09/2026 18:00"},
+         {"nom": "retour", "label": "Retour", "type": "texte", "largeur": 200,
+          "placeholder": "+7j 18:00 / 27/09/2026 18:00"},
+     ]},
+    {"nom": "absence_off", "fonction": "fonctions.scenario.absence_off",
+     "description": "Annule l'absence en cours ou programmée"},
 ] + [
     {"nom": f"douches_{n}", "fonction": f"fonctions.scenario.douches_{n}",
      "description": f"Nombre de douches souhaité : {n}"}
