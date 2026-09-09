@@ -604,13 +604,15 @@ async def _decouvrir_capacites(user, pwd):
         if water is None:
             raise RuntimeError("Chauffe-eau introuvable sur le compte Cozytouch")
         definition = water.definition
-        commandes = sorted(
-            {c.command_name for c in definition.commands if getattr(c, "command_name", None)}
-        )
+        commandes = _commandes_appareil(water)
         modes = []
         for etat in getattr(definition, "states", None) or []:
-            if "absencemode" in str(getattr(etat, "qualified_name", "")).lower():
-                modes = [str(v) for v in (getattr(etat, "values", None) or [])]
+            nom = getattr(etat, "qualified_name", None) or getattr(etat, "name", None)
+            if isinstance(etat, dict):
+                nom = etat.get("qualifiedName") or etat.get("name")
+            if "absencemode" in str(nom or "").lower():
+                valeurs = etat.get("values") if isinstance(etat, dict) else getattr(etat, "values", None)
+                modes = [str(v) for v in (valeurs or [])]
                 break
         return {
             "url": water.device_url,
@@ -801,41 +803,95 @@ def _refresh_after_command():
 # seul « get_setup » — à lancer depuis le bouton du paramétrage, pas
 # automatiquement.
 
+def _etats_appareil(appareil):
+    """Les états d'un appareil du setup, en ``{nom: valeur}``.
+
+    La forme de ``device.states`` varie selon la version de pyoverkiz :
+    conteneur d'objets ``State``, dictionnaire indexé par nom (l'itération
+    ne donne alors que des chaînes), ou liste de dictionnaires bruts. On
+    accepte les trois plutôt que de parier sur une version — le module
+    tourne avec ``pyoverkiz>=1.13``, sans borne haute.
+    """
+    etats = {}
+    brut = getattr(appareil, "states", None) or []
+    for entree in brut:
+        if isinstance(entree, str):  # itération sur les noms
+            try:
+                objet = brut[entree]
+            except Exception:
+                objet = None
+            etats[entree] = getattr(objet, "value", objet)
+        elif isinstance(entree, dict):
+            nom = entree.get("name")
+            if nom:
+                etats[nom] = entree.get("value")
+        else:
+            nom = getattr(entree, "name", None)
+            if nom:
+                etats[nom] = getattr(entree, "value", None)
+    return etats
+
+
+def _commandes_appareil(appareil):
+    """Les noms de commandes déclarés par un appareil (mêmes précautions)."""
+    noms = set()
+    definition = getattr(appareil, "definition", None)
+    for entree in (getattr(definition, "commands", None) or []):
+        if isinstance(entree, str):
+            noms.add(entree)
+        elif isinstance(entree, dict):
+            nom = entree.get("command_name") or entree.get("commandName")
+            if nom:
+                noms.add(nom)
+        else:
+            nom = getattr(entree, "command_name", None) or getattr(entree, "commandName", None)
+            if nom:
+                noms.add(nom)
+    return sorted(noms)
+
+
 async def _inventaire_absence(user, pwd):
     client = _make_client(user, pwd)
     async with client:
         await client.login()
         setup = await client.get_setup()
-        trouves = []
+        trouves, tous = [], []
         for appareil in setup.devices:
             etats = {
-                etat.name: str(etat.value)
-                for etat in (appareil.states or [])
-                if "absence" in str(etat.name).lower()
+                nom: str(valeur)
+                for nom, valeur in _etats_appareil(appareil).items()
+                if "absence" in str(nom).lower()
             }
-            commandes = sorted({
-                commande.command_name
-                for commande in appareil.definition.commands
-                if "absence" in str(commande.command_name).lower()
-            })
+            commandes = [
+                nom for nom in _commandes_appareil(appareil)
+                if "absence" in nom.lower()
+            ]
+            fiche = {
+                "label": getattr(appareil, "label", "") or "",
+                "url": getattr(appareil, "device_url", "") or "",
+                "widget": str(getattr(appareil, "widget", "") or ""),
+            }
+            tous.append(fiche)
             if etats or commandes:
-                trouves.append({
-                    "label": appareil.label,
-                    "url": appareil.device_url,
-                    "widget": str(appareil.widget or ""),
-                    "etats": etats,
-                    "commandes": commandes,
-                })
-        return trouves
+                trouves.append(dict(fiche, etats=etats, commandes=commandes))
+        return trouves, tous
 
 
 def chercher_absence_installation():
-    """Quels appareils du compte portent un état ou une commande d'absence."""
+    """Quels appareils du compte portent un état ou une commande d'absence.
+
+    Renvoie aussi la liste complète des appareils : si aucun ne parle
+    d'absence, c'est elle qui dira où chercher ensuite.
+    """
     user, pwd = _require_credentials()
-    trouves = asyncio.run(_inventaire_absence(user, pwd))
+    trouves, tous = asyncio.run(_inventaire_absence(user, pwd))
     set_setting(
         "inventaire_absence",
-        json.dumps({"ts": datetime.now().isoformat(), "appareils": trouves}),
+        json.dumps({
+            "ts": datetime.now().isoformat(),
+            "appareils": trouves,
+            "tous": tous,
+        }),
         module=MODULE,
     )
     resume = ", ".join(
@@ -843,7 +899,8 @@ def chercher_absence_installation():
         for a in trouves
     )
     journal(
-        f"Recherche de l'absence dans l'installation : {resume or 'aucun appareil trouvé'}",
+        f"Recherche de l'absence sur {len(tous)} appareils : "
+        f"{resume or 'aucun appareil ne parle d’absence'}",
         module=MODULE,
     )
     return trouves
@@ -858,7 +915,11 @@ def inventaire_absence():
         photo = json.loads(brut)
     except ValueError:
         return None
-    return {"ts": parse_iso(photo.get("ts")), "appareils": photo.get("appareils") or []}
+    return {
+        "ts": parse_iso(photo.get("ts")),
+        "appareils": photo.get("appareils") or [],
+        "tous": photo.get("tous") or [],
+    }
 
 
 # ----------------------------------------------------------------------

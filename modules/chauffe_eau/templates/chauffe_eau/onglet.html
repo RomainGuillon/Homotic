@@ -230,8 +230,26 @@
             {% endif %}
           </div>
         {% empty %}
-          <p class="mb-0 text-faint small">Aucun appareil ne porte d'état d'absence.</p>
+          <p class="text-warning small">Aucun appareil ne porte d'état ni de commande
+            d'absence. Le mode vacances est donc géré ailleurs que dans les états des
+            appareils — la liste ci-dessous dira où chercher.</p>
         {% endfor %}
+
+        {% if inventaire.tous %}
+          <details>
+            <summary class="text-secondary small" style="cursor:pointer">
+              Tous les appareils du compte ({{ inventaire.tous|length }})</summary>
+            <table class="table table-sm small mt-2 mb-0">
+              <thead><tr><th>Nom</th><th>Type</th><th>URL</th></tr></thead>
+              <tbody>
+                {% for a in inventaire.tous %}
+                  <tr><td>{{ a.label }}</td><td class="text-faint">{{ a.widget }}</td>
+                    <td><code>{{ a.url }}</code></td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </details>
+        {% endif %}
       {% endif %}
     </div>
   </div>
