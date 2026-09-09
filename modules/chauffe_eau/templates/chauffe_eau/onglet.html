@@ -92,7 +92,7 @@
               <span class="badge rounded-pill text-bg-info">
                 <i class="bi bi-suitcase me-1"></i>Absence jusqu'au {{ absence_fin|date:"d/m H:i" }}</span>
             {% elif absence_a_venir %}
-              <span class="badge rounded-pill text-bg-secondary">
+              <span class="badge rounded-pill text-bg-info-subtle">
                 <i class="bi bi-suitcase me-1"></i>Absence prévue le {{ absence_debut|date:"d/m H:i" }}</span>
             {% endif %}
           </div>
@@ -144,13 +144,21 @@
         sont conservées par la passerelle, y compris après le retour.
       </p>
 
-      {% if absence_debut or absence_fin %}
+      {% if absence_annulable %}
         <p class="mb-3">
           <span class="text-secondary small">Programmée dans le ballon :</span>
           <strong>{{ absence_debut|date:"d/m/Y H:i"|default:"—" }}</strong>
           <span class="text-secondary">→</span>
           <strong>{{ absence_fin|date:"d/m/Y H:i"|default:"—" }}</strong>
           <span class="text-faint small">(mode « {{ absence_mode|default:"?" }} »)</span>
+        </p>
+      {% elif absence_fin %}
+        <p class="mb-3 text-faint small">
+          Aucune absence active. Dernière période connue du ballon :
+          {{ absence_debut|date:"d/m/Y H:i"|default:"—" }} →
+          {{ absence_fin|date:"d/m/Y H:i"|default:"—" }} — les dates restent
+          inscrites dans la passerelle, elles ne signifient rien tant que le
+          mode est « off ».
         </p>
       {% endif %}
 
@@ -170,7 +178,7 @@
         </div>
       </form>
 
-      {% if absence_debut or absence_fin or absence_on %}
+      {% if absence_annulable %}
         <form method="post" class="mt-3">
           {% csrf_token %}
           <input type="hidden" name="action" value="absence_off">

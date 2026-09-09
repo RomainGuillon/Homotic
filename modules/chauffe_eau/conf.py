@@ -49,11 +49,17 @@ SCENARIO = [
      "description": "Boost en mode programme"},
     {"nom": "absence", "fonction": "fonctions.scenario.absence",
      "description": "Programme une absence (départ et retour)",
+     # Jour et heure séparés : un jour vide vaut le jour où le scénario
+     # s'exécute, ce qu'aucun sélecteur date-heure ne sait exprimer.
      "params": [
-         {"nom": "depart", "label": "Départ", "type": "date", "largeur": 195,
-          "placeholder": "Laisser vide = au moment où le scénario s'exécute"},
-         {"nom": "retour", "label": "Retour", "type": "date", "largeur": 195,
-          "placeholder": "Date et heure de retour (obligatoire)"},
+         {"nom": "depart_jour", "label": "Départ", "type": "jour", "largeur": 150,
+          "placeholder": "Vide = le jour où le scénario s'exécute"},
+         {"nom": "depart_heure", "label": "à", "type": "heure", "largeur": 105,
+          "placeholder": "Vide = l'heure d'exécution"},
+         {"nom": "retour_jour", "label": "Retour", "type": "jour", "largeur": 150,
+          "placeholder": "Vide = le jour de l'exécution, ou le lendemain si l'heure est déjà passée"},
+         {"nom": "retour_heure", "label": "à", "type": "heure", "largeur": 105,
+          "placeholder": "Heure de retour"},
      ]},
     {"nom": "absence_off", "fonction": "fonctions.scenario.absence_off",
      "description": "Annule l'absence en cours ou programmée"},

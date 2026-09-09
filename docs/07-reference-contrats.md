@@ -86,7 +86,7 @@ Un paramètre qui déclare des `options` devient une **liste déroulante**. Sans
 | Champ | Rôle |
 | --- | --- |
 | `options` | `[[valeur, libellé], …]` — présent ⇒ liste déroulante |
-| `type` | `texte` (défaut), `nombre`, `date` (sélecteur date-heure), `heure` |
+| `type` | `texte` (défaut), `nombre`, `jour` (sélecteur de date), `heure`, `date` (sélecteur date-heure) |
 | `defaut` | Valeur pré-remplie à la création de l'action |
 | `placeholder` | Exemple affiché dans le champ vide, et en infobulle |
 | `largeur` | Largeur maxi du champ, en pixels (180 par défaut) |
@@ -94,6 +94,11 @@ Un paramètre qui déclare des `options` devient une **liste déroulante**. Sans
 > Une saisie libre arrive toujours en **texte**. La fonction du module
 > l'interprète elle-même et lève une exception claire si elle n'y arrive
 > pas : le moteur l'écrit alors dans le Journal et arrête le scénario.
+
+Pour un instant, préférer **deux paramètres** — un `jour` et une `heure` —
+à un seul `date`. Un scénario rejoue : « aujourd'hui à 18 h » n'est
+exprimable que si le jour peut rester vide, ce qu'un sélecteur date-heure
+ne permet pas. L'action `absence` du module chauffe-eau en est l'exemple.
 
 Pour des entrées dynamiques (une action par prise, par climatisation…),
 construire la liste dans le module et l'exposer via une fonction :

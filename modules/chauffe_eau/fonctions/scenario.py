@@ -11,6 +11,8 @@ Déclarées dans conf.py (SCENARIO) : l'éditeur de scénarios les proposera
 comme actions.
 """
 
+from datetime import timedelta
+
 from . import api
 
 
@@ -41,20 +43,39 @@ def boost_prog():
     return api.set_boost_mode("prog")
 
 
-def absence(depart="maintenant", retour=""):
+def absence(depart_jour="", depart_heure="", retour_jour="", retour_heure="",
+            depart="", retour=""):
     """Programme une absence entre deux dates.
 
-    L'éditeur de scénarios présente deux sélecteurs date-heure, comme
-    l'onglet du module. Départ vide = au moment où le scénario s'exécute.
-    Retour vide = erreur : une absence sans date de retour laisserait le
+    Chaque moment se saisit en deux champs : un jour et une heure. Le
+    **jour laissé vide vaut le jour où le scénario s'exécute** — c'est ce
+    qui permet d'écrire « départ aujourd'hui à 18 h » dans un scénario qui
+    rejouera demain à l'identique. Renseigner le jour fixe une date
+    précise.
+
+    Deux commodités :
+
+    - départ entièrement vide = au moment de l'exécution ;
+    - retour sans jour dont l'heure tombe avant le départ = le **prochain**
+      passage à cette heure, donc le lendemain. « Je pars ce soir 22 h,
+      retour 7 h » veut dire 7 h demain, pas 7 h ce matin.
+
+    Un retour vide reste une erreur : une absence sans fin laisserait le
     ballon froid indéfiniment.
 
-    Les deux champs passent par ``api.parse_moment``, qui accepte aussi
-    « maintenant » et les écritures relatives (« +7j 18:00 », « +12h »).
-    Le sélecteur ne les propose pas — elles restent utilisables depuis
-    l'onglet, ou le jour où une action à durée relative sera exposée.
+    ``depart`` et ``retour`` acceptent encore un texte complet
+    (« 20/09/2026 18:00 », « maintenant », « +7j 18:00 ») : les scénarios
+    écrits avant les deux champs continuent de fonctionner.
     """
-    return api.set_absence(depart, retour)
+    debut = api.parse_moment(depart) if depart else api.moment_jour_heure(
+        depart_jour, depart_heure
+    )
+    fin = api.parse_moment(retour) if retour else api.moment_jour_heure(
+        retour_jour, retour_heure
+    )
+    if fin and debut and fin <= debut and not retour and not str(retour_jour or "").strip():
+        fin += timedelta(days=1)
+    return api.set_absence(debut or "maintenant", fin)
 
 
 def absence_off():

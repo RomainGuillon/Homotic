@@ -260,17 +260,38 @@ la passerelle après coup — d'où la distinction entre l'info `absence` (le
 mode déclaré par le ballon) et `absence_active` (**on** seulement si
 l'absence est en cours maintenant).
 
-En scénario, l'action **absence** prend les deux dates en paramètre, avec le
-même sélecteur date-heure que l'onglet. Départ vide = au moment où le
-scénario s'exécute. L'action **absence_off** annule l'absence en cours.
+En scénario, l'action **absence** prend quatre champs : un jour et une heure
+pour le départ, un jour et une heure pour le retour. **Un jour laissé vide
+vaut le jour où le scénario s'exécute** — c'est ce qui permet d'écrire
+« départ aujourd'hui à 18 h » dans un scénario qui rejouera demain à
+l'identique. Renseigner le jour fixe une date précise.
 
-Un retour vide est refusé : une absence sans fin laisserait le ballon froid
-indéfiniment.
+Deux commodités :
 
-Le module comprend aussi `maintenant` et les écritures relatives
-(`+7j 18:00`, `+12h`, `+90m`) — les seules qui gardent un sens dans un
-scénario récurrent. Le sélecteur ne les propose pas : elles attendent une
-action à durée relative, qui reste à écrire.
+- départ entièrement vide = au moment de l'exécution ;
+- retour sans jour dont l'heure tombe avant le départ = le **prochain**
+  passage à cette heure, donc le lendemain. « Je pars ce soir 22 h, retour
+  7 h » veut dire 7 h demain, pas 7 h ce matin.
+
+L'action **absence_off** annule l'absence. Un retour vide est refusé : une
+absence sans fin laisserait le ballon froid indéfiniment.
+
+Le module comprend aussi les écritures textuelles `maintenant`,
+`20/09/2026 18:00`, `+7j 18:00`, `+12h`, `+90m` : les scénarios écrits avant
+les champs jour/heure continuent donc de fonctionner.
+
+### L'absence réglée ailleurs
+
+L'absence peut être posée depuis l'application Cozytouch, et le ballon la
+termine seul à la date de retour. Homotic lit le même état : ces changements
+remontent donc, mais au rythme du cache du module — jusqu'à quelques minutes.
+Le bouton **Actualiser** de l'onglet force la lecture, et chaque changement
+d'absence constaté sur le ballon donne une ligne dans le Journal.
+
+Le mode fait foi, pas les dates : elles restent inscrites dans la passerelle
+après le retour comme après une annulation. C'est pourquoi l'onglet
+n'affiche « aucune absence » qu'en regardant le mode, et pourquoi la
+condition à utiliser est `absence_active`.
 
 > Les noms de commandes et les valeurs du mode absence varient d'un modèle à
 > l'autre. Le module les lit **une fois** dans la définition de l'appareil et

@@ -347,8 +347,10 @@ function conditionInnerBase(type, data = {}) {
 
 // Paramètres d'une action « fonction ». Un paramètre qui déclare des
 // « options » devient une liste déroulante ; sans options, c'est une
-// saisie libre (texte, nombre ou date-heure selon « type »), pour les
-// valeurs qu'aucune liste ne peut énumérer — une date, par exemple.
+// saisie libre selon « type » (texte, nombre, jour, heure, date-heure),
+// pour les valeurs qu'aucune liste ne peut énumérer — une date, par
+// exemple. Un jour et une heure séparés valent mieux qu'un date-heure
+// quand le jour doit pouvoir rester vide, c'est-à-dire « celui du jour ».
 function renderFnParams(sel, saved = {}) {
   const box = sel.parentNode.querySelector('[data-params-box]');
   if (!box) return;
@@ -361,12 +363,14 @@ function renderFnParams(sel, saved = {}) {
       champ = `<select class="form-select form-select-sm w-auto" data-param="${p.nom}">
          ${p.options.map(o => opt(o[0], o[1], val)).join('')}</select>`;
     } else {
-      const types = { nombre: 'number', date: 'datetime-local', heure: 'time' };
-      // Un champ date-heure n'affiche que ce qu'il sait lire : une valeur
-      // écrite autrement (héritée d'un scénario plus ancien) le laisserait
-      // vide sans le dire. On la vide franchement pour que la valeur
-      // enregistrée corresponde à ce qui est affiché.
-      if (p.type === 'date' && val && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(val)) val = '';
+      const types = { nombre: 'number', date: 'datetime-local', jour: 'date', heure: 'time' };
+      // Un champ date ou heure n'affiche que ce qu'il sait lire : une
+      // valeur écrite autrement (héritée d'un scénario plus ancien) le
+      // laisserait vide sans le dire. On la vide franchement, pour que la
+      // valeur enregistrée corresponde à ce qui est affiché.
+      const motifs = { date: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/, jour: /^\d{4}-\d{2}-\d{2}$/,
+                       heure: /^\d{1,2}:\d{2}$/ };
+      if (motifs[p.type] && val && !motifs[p.type].test(val)) val = '';
       champ = `<input type="${types[p.type] || 'text'}" data-param="${p.nom}"
          class="form-control form-control-sm" style="width:${p.largeur || 180}px"
          value="${esc(val)}" placeholder="${esc(p.placeholder)}" title="${esc(p.placeholder)}">`;

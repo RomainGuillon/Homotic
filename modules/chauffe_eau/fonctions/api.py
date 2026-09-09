@@ -205,6 +205,46 @@ def parse_moment(texte, reference=None):
     )
 
 
+def moment_jour_heure(jour, heure, reference=None):
+    """Combine un jour et une heure saisis dans deux champs séparés.
+
+    C'est ce que produisent les sélecteurs de l'éditeur de scénarios :
+    un champ date (``2026-09-27``, **vide = le jour où le scénario
+    s'exécute**) et un champ heure (``18:00``). Séparer les deux est la
+    seule façon d'écrire « aujourd'hui à 18 h » dans un scénario qui doit
+    rejouer demain à l'identique.
+
+    Retourne un ``datetime``, ou None si les deux champs sont vides.
+    """
+    ref = (reference or datetime.now()).replace(second=0, microsecond=0)
+    jour, heure = str(jour or "").strip(), str(heure or "").strip()
+    if not jour and not heure:
+        return None
+
+    base = parse_moment(jour, ref) if jour else ref
+    if not heure:
+        # Un jour sans heure vaut son début ; ni jour ni heure ne serait
+        # arrivé ici. Le jour d'exécution sans heure garde l'heure
+        # d'exécution : c'est « maintenant », dit autrement.
+        return base.replace(hour=0, minute=0) if jour else base
+
+    parts = heure.replace("h", ":").split(":")
+    try:
+        h, m = int(parts[0]), int(parts[1]) if len(parts) > 1 and parts[1] else 0
+    except (ValueError, IndexError):
+        raise ValueError(f"heure « {heure} » incomprise (attendu « 18:00 »)")
+    if not (0 <= h <= 23 and 0 <= m <= 59):
+        raise ValueError(f"heure « {heure} » hors bornes")
+    return base.replace(hour=h, minute=m)
+
+
+def _vers_moment(valeur):
+    """Accepte un ``datetime`` déjà construit ou un texte à interpréter."""
+    if isinstance(valeur, datetime):
+        return valeur.replace(second=0, microsecond=0)
+    return parse_moment(valeur)
+
+
 def _hot_water_pct(raw):
     """% d'eau chaude = douches restantes / douches max (repli : V40)."""
     remaining = _num(_find(raw, "numberofshowerremaining") or _find(raw, "shower", "remaining"))
@@ -571,8 +611,8 @@ def set_absence(depart="maintenant", retour=""):
     (« 20/09/2026 18:00 », « maintenant », « +7j 18:00 »). Retourne un
     texte décrivant la période programmée.
     """
-    debut = parse_moment(depart) or datetime.now().replace(second=0, microsecond=0)
-    fin = parse_moment(retour)
+    debut = _vers_moment(depart) or datetime.now().replace(second=0, microsecond=0)
+    fin = _vers_moment(retour)
     if fin is None:
         raise ValueError("date de retour manquante : l'absence a besoin d'une fin")
     if fin <= debut:
@@ -648,13 +688,53 @@ def arreter_absence():
     return "absence annulée"
 
 
+# Vrai pendant qu'on relit le ballon juste après une de nos commandes : le
+# changement d'absence qu'on va lire vient de nous, il est déjà journalisé,
+# inutile de le signaler une seconde fois comme venant de l'extérieur.
+_RELECTURE_APRES_COMMANDE = False
+
+
 def _refresh_after_command():
     """Laisse la passerelle appliquer la commande puis rafraîchit le cache."""
+    global _RELECTURE_APRES_COMMANDE
     time_mod.sleep(2)
+    _RELECTURE_APRES_COMMANDE = True
     try:
         get_status_cached(force=True)
     except Exception:
         pass
+    finally:
+        _RELECTURE_APRES_COMMANDE = False
+
+
+def _suivre_absence(data):
+    """Signale au Journal un changement d'absence venu d'ailleurs.
+
+    L'absence se règle aussi depuis l'application Cozytouch, et le ballon
+    la termine tout seul à la date de retour. Homotic lit le même état :
+    ces changements arrivent donc bien jusqu'ici, mais silencieusement, au
+    rythme du cache (quelques minutes). Une ligne de journal les rend
+    visibles sans coûter le moindre appel — on compare deux lectures déjà
+    faites.
+    """
+    signature = "|".join(
+        str(data.get(cle) or "") for cle in ("absence", "absence_debut", "absence_fin")
+    )
+    connue = get_setting("absence_vue", module=MODULE, default=None)
+    if signature == connue:
+        return
+    set_setting("absence_vue", signature, module=MODULE)
+    if connue is None or _RELECTURE_APRES_COMMANDE:
+        return  # première lecture (on pose le repère), ou notre propre commande
+
+    debut, fin = parse_iso(data.get("absence_debut")), parse_iso(data.get("absence_fin"))
+    if is_absence(data):
+        detail = f"en cours jusqu'au {fin:%d/%m/%Y %H:%M}" if fin else "en cours"
+    elif str(data.get("absence") or "").lower() not in ("", "off", "none") and debut:
+        detail = f"programmée du {debut:%d/%m/%Y %H:%M} au {fin:%d/%m/%Y %H:%M}"
+    else:
+        detail = "terminée ou annulée"
+    journal(f"Absence {detail} (changement relevé sur le ballon)", module=MODULE)
 
 
 # ----------------------------------------------------------------------
@@ -687,6 +767,10 @@ def get_status_cached(force=False, ttl_minutes=15):
         return None, None, str(exc)
 
     set_setting("cache_status", json.dumps({"ts": now.isoformat(), "data": data}), module=MODULE)
+    try:
+        _suivre_absence(data)
+    except Exception:
+        pass  # un journal manquant ne doit jamais faire échouer un relevé
     return data, now, ""
 
 
