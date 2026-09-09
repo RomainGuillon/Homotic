@@ -355,18 +355,26 @@ function renderFnParams(sel, saved = {}) {
   const f = DATA.fonctions[parseInt(sel.value, 10)];
   const defs = (f && f.params) || [];
   box.innerHTML = defs.map(p => {
-    const val = saved[p.nom] !== undefined ? saved[p.nom] : (p.defaut || '');
+    let val = saved[p.nom] !== undefined ? saved[p.nom] : (p.defaut || '');
     let champ;
     if (p.options && p.options.length) {
       champ = `<select class="form-select form-select-sm w-auto" data-param="${p.nom}">
          ${p.options.map(o => opt(o[0], o[1], val)).join('')}</select>`;
     } else {
       const types = { nombre: 'number', date: 'datetime-local', heure: 'time' };
+      // Un champ date-heure n'affiche que ce qu'il sait lire : une valeur
+      // écrite autrement (héritée d'un scénario plus ancien) le laisserait
+      // vide sans le dire. On la vide franchement pour que la valeur
+      // enregistrée corresponde à ce qui est affiché.
+      if (p.type === 'date' && val && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(val)) val = '';
       champ = `<input type="${types[p.type] || 'text'}" data-param="${p.nom}"
-         class="form-control form-control-sm" style="max-width:${p.largeur || 180}px"
+         class="form-control form-control-sm" style="width:${p.largeur || 180}px"
          value="${esc(val)}" placeholder="${esc(p.placeholder)}" title="${esc(p.placeholder)}">`;
     }
-    return `<span class="small text-secondary">${p.label}</span>${champ}`;
+    // Libellé et champ dans le même conteneur : sans cela, une ligne trop
+    // étroite renvoie le libellé d'un côté et son champ de l'autre.
+    return `<span class="d-inline-flex gap-1 align-items-center">
+       <span class="small text-secondary">${p.label}</span>${champ}</span>`;
   }).join('');
 }
 function initFnParams(row, data) {

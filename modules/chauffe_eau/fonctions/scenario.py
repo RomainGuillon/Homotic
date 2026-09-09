@@ -44,16 +44,15 @@ def boost_prog():
 def absence(depart="maintenant", retour=""):
     """Programme une absence entre deux dates.
 
-    Les deux champs se saisissent dans l'action du scénario. Trois
-    écritures acceptées (voir ``api.parse_moment``) :
+    L'éditeur de scénarios présente deux sélecteurs date-heure, comme
+    l'onglet du module. Départ vide = au moment où le scénario s'exécute.
+    Retour vide = erreur : une absence sans date de retour laisserait le
+    ballon froid indéfiniment.
 
-    - « 20/09/2026 18:00 » : date fixe, pour une absence ponctuelle ;
-    - « maintenant » : au moment où le scénario s'exécute ;
-    - « +7j 18:00 » : dans 7 jours à 18 h — la seule forme qui garde un
-      sens dans un scénario récurrent ou déclenché par un bouton.
-
-    Départ vide = maintenant. Retour vide = erreur : une absence sans
-    date de retour laisserait le ballon froid indéfiniment.
+    Les deux champs passent par ``api.parse_moment``, qui accepte aussi
+    « maintenant » et les écritures relatives (« +7j 18:00 », « +12h »).
+    Le sélecteur ne les propose pas — elles restent utilisables depuis
+    l'onglet, ou le jour où une action à durée relative sera exposée.
     """
     return api.set_absence(depart, retour)
 

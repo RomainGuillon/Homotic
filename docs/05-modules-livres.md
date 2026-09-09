@@ -260,21 +260,17 @@ la passerelle après coup — d'où la distinction entre l'info `absence` (le
 mode déclaré par le ballon) et `absence_active` (**on** seulement si
 l'absence est en cours maintenant).
 
-En scénario, l'action **absence** prend les deux dates en paramètre. Trois
-écritures acceptées :
-
-| Écriture | Sens |
-| --- | --- |
-| `20/09/2026 18:00` | date fixe — absence ponctuelle |
-| `maintenant` | au moment où le scénario s'exécute |
-| `+7j 18:00` | dans 7 jours à 18 h (aussi `+12h`, `+90m`) |
-
-Les formes relatives sont les seules qui gardent un sens dans un scénario
-récurrent ou déclenché par un bouton : « je pars » → absence de maintenant
-à `+7j 18:00`. L'action **absence_off** annule l'absence en cours.
+En scénario, l'action **absence** prend les deux dates en paramètre, avec le
+même sélecteur date-heure que l'onglet. Départ vide = au moment où le
+scénario s'exécute. L'action **absence_off** annule l'absence en cours.
 
 Un retour vide est refusé : une absence sans fin laisserait le ballon froid
 indéfiniment.
+
+Le module comprend aussi `maintenant` et les écritures relatives
+(`+7j 18:00`, `+12h`, `+90m`) — les seules qui gardent un sens dans un
+scénario récurrent. Le sélecteur ne les propose pas : elles attendent une
+action à durée relative, qui reste à écrire.
 
 > Les noms de commandes et les valeurs du mode absence varient d'un modèle à
 > l'autre. Le module les lit **une fois** dans la définition de l'appareil et
