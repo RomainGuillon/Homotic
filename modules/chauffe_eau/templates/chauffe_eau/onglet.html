@@ -154,11 +154,12 @@
         </p>
       {% elif absence_fin %}
         <p class="mb-3 text-faint small">
-          Aucune absence active. Dernière période connue du ballon :
-          {{ absence_debut|date:"d/m/Y H:i"|default:"—" }} →
-          {{ absence_fin|date:"d/m/Y H:i"|default:"—" }} — les dates restent
-          inscrites dans la passerelle, elles ne signifient rien tant que le
-          mode est « off ».
+          Aucune absence : le ballon est sur le mode
+          « {{ absence_mode|default:"off" }} ». Dernière période inscrite dans
+          la passerelle : {{ absence_debut|date:"d/m/Y H:i"|default:"—" }} →
+          {{ absence_fin|date:"d/m/Y H:i"|default:"—" }} — elle y reste après
+          le retour comme après une annulation, et ne signifie donc rien par
+          elle-même.
         </p>
       {% endif %}
 

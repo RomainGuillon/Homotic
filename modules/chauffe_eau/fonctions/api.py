@@ -290,52 +290,43 @@ def is_heating(value):
     return str(value or "").lower() in ("on", "heating", "true", "1")
 
 
-def _signature_periode(data):
-    """Les deux dates d'absence, sous forme de repère comparable."""
-    data = data or {}
-    return f"{data.get('absence_debut') or ''}|{data.get('absence_fin') or ''}"
-
-
 def etat_absence(data):
-    """Ce que le ballon dit de l'absence — en croisant le mode ET les dates.
+    """Ce que le ballon dit de l'absence. **Le mode fait foi.**
 
-    Aucun des deux signaux ne suffit seul, et c'est tout le piège :
+    Les dates ne disent rien à elles seules : ``core:AbsenceStartDateState``
+    et ``core:AbsenceEndDateState`` restent inscrites dans la passerelle
+    après le retour, après une annulation faite ici, et après une
+    annulation faite depuis l'application Cozytouch. S'y fier faisait
+    survivre l'absence à sa désactivation, d'où qu'elle vienne.
 
-    - le **mode** reste « off » tant que la date de départ n'est pas
-      atteinte. Une absence programmée depuis l'application Cozytouch
-      n'apparaîtrait donc nulle part dans Homotic si l'on ne regardait que
-      lui (constaté le 2026-09-09) ;
-    - les **dates** restent inscrites dans la passerelle après le retour,
-      et après une annulation : à elles seules, elles ressusciteraient une
-      absence qu'on vient d'annuler.
+    ``modbuslink:DHWAbsenceModeState``, lui, suit l'appareil : relevé à
+    « on » le 2026-09-09 juste après une absence posée depuis
+    l'application, et repassé à « off » à sa désactivation. C'est donc le
+    signal juste — à condition de le lire à jour, ce que le
+    rafraîchissement des états assure (voir ``_rafraichir``).
 
-    On retient donc une absence si le mode est actif, ou si la période
-    court encore et n'est pas celle qu'Homotic a annulée — repère gardé en
-    réglage ``absence_annulee``.
+    Les dates gardent un rôle : borner l'absence dans le temps, et
+    pré-remplir le formulaire. Elles sont d'ailleurs affichées même quand
+    le mode est « off », en clair comme « dernière période connue » : si un
+    jour une absence programmée pour plus tard laissait le mode à « off »,
+    cela se verrait immédiatement au lieu de passer pour une panne.
 
     Retourne un dictionnaire : mode, debut, fin, retenue, en_cours, a_venir.
     """
     data = data or {}
     mode = str(data.get("absence") or "").lower()
-    mode_actif = mode not in ("", "off", "none")
+    retenue = mode not in ("", "off", "none")
     debut, fin = parse_iso(data.get("absence_debut")), parse_iso(data.get("absence_fin"))
     maintenant = datetime.now()
 
-    annulee = _signature_periode(data) == get_setting(
-        "absence_annulee", module=MODULE, default=None
-    )
-    periode_en_cours = bool(fin and fin > maintenant and not annulee)
-
-    retenue = mode_actif or periode_en_cours
-    en_cours = retenue and (debut is None or debut <= maintenant) and (
-        fin is None or fin > maintenant
-    )
     return {
         "mode": data.get("absence"),
         "debut": debut,
         "fin": fin,
         "retenue": retenue,
-        "en_cours": en_cours,
+        "en_cours": retenue
+        and (debut is None or debut <= maintenant)
+        and (fin is None or fin > maintenant),
         "a_venir": bool(retenue and debut and debut > maintenant),
     }
 
@@ -718,10 +709,6 @@ def set_absence(depart="maintenant", retour=""):
         )
 
     mode = mode_absence_actif()
-    # Une nouvelle absence efface le repère d'annulation : sans cela,
-    # reprogrammer exactement la période qu'on venait d'annuler resterait
-    # invisible (voir etat_absence).
-    set_setting("absence_annulee", "", module=MODULE)
     _lancer(dates + [("setAbsenceMode", [mode])], "absence")
     journal(
         f"Absence programmée du {debut:%d/%m/%Y %H:%M} au {fin:%d/%m/%Y %H:%M} "
@@ -764,12 +751,9 @@ def arreter_absence():
     else:
         _lancer([("setAbsenceMode", ["off"])], "absence off")
     journal("Absence annulée", module=MODULE)
+    # Les dates restent inscrites dans la passerelle après l'annulation :
+    # c'est le mode, remis à « off », qui la marque (voir etat_absence).
     _refresh_after_command()
-    # Les dates survivent à l'annulation dans la passerelle : on note
-    # laquelle a été annulée, pour ne pas la reprendre pour une absence
-    # à venir (voir etat_absence).
-    data, _ts, _err = get_status_cached()
-    set_setting("absence_annulee", _signature_periode(data), module=MODULE)
     return "absence annulée"
 
 
