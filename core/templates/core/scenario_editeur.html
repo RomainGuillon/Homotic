@@ -408,8 +408,10 @@ function renderFnParams(sel, saved = {}) {
    / Demain / … / Date précise » suivie du calendrier, sans montrer un
    calendrier inutile le reste du temps.
 
-   Masquage par style et non par classe ou attribut : « d-inline-flex »
-   l'emporterait sur « d-none » comme sur « hidden ». */
+   Masquage par style « important » : le conteneur porte « d-inline-flex »,
+   dont le « display: inline-flex !important » l'emporte aussi bien sur la
+   classe « d-none » que sur l'attribut « hidden » — et sur un style en
+   ligne ordinaire. Il faut donc masquer avec la même priorité. */
 function majDependances(box) {
   const sel = box.parentNode.querySelector('[data-field="fonction_idx"]');
   const f = sel ? DATA.fonctions[parseInt(sel.value, 10)] : null;
@@ -421,7 +423,8 @@ function majDependances(box) {
     const wrap = box.querySelector(`[data-param-wrap="${p.nom}"]`);
     if (!wrap) return;
     const visible = Object.entries(p.depend).every(([nom, attendu]) => valeurs[nom] === attendu);
-    wrap.style.display = visible ? '' : 'none';
+    if (visible) wrap.style.removeProperty('display');
+    else wrap.style.setProperty('display', 'none', 'important');
   });
 }
 /* Rappelée à chaque changement : le champ dépendant apparaît sans recharger. */

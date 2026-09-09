@@ -84,8 +84,26 @@ def onglet(request):
             if action == "params":
                 _save_params(request)
             elif action == "refresh":
-                api.get_status_cached(force=True)
+                # Rafraîchissement demandé à la passerelle : c'est le seul
+                # moyen de voir tout de suite un réglage fait ailleurs.
+                api.get_status_cached(force=True, rafraichir=True)
                 messages.success(request, "Chauffe-eau actualisé.")
+            elif action == "inventaire":
+                trouves = api.chercher_absence_installation()
+                messages.success(
+                    request,
+                    f"{len(trouves)} appareil(s) de l'installation portent un état "
+                    "ou une commande d'absence." if trouves else
+                    "Aucun appareil de l'installation ne porte d'état d'absence.",
+                )
+            elif action == "instantane":
+                api.prendre_instantane()
+                messages.success(
+                    request,
+                    "Instantané pris. Faites votre réglage sur l'application "
+                    "Cozytouch, puis cliquez sur Actualiser : les états qui "
+                    "auront changé s'afficheront ici.",
+                )
             elif action == "showers":
                 n = api.set_showers(request.POST.get("showers", 1))
                 messages.success(request, f"{n} douche(s) demandée(s).")
@@ -152,6 +170,8 @@ def onglet(request):
             }
         )
         context.update(_contexte_absence(data))
+        context["comparaison"] = api.comparer_instantane(data)
+    context["inventaire"] = api.inventaire_absence()
 
     # Suivi des chauffes : ne bloque jamais l'onglet si les tables du module
     # ne sont pas encore migrées.

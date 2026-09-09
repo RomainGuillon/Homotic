@@ -188,6 +188,96 @@
     </div>
   </div>
 
+  {# ---------- Où vit l'absence dans l'installation ? ---------- #}
+  <div class="card mb-4">
+    <div class="card-header"><i class="bi bi-diagram-3 me-2"></i>L'absence dans l'installation</div>
+    <div class="card-body">
+      <p class="text-secondary small">
+        Le « mode vacances » de l'application Cozytouch met <strong>toute
+        l'installation</strong> en absence ; le bouton ci-dessus ne met que le
+        ballon. Les deux gestes ne touchent donc pas le même équipement, et
+        c'est pourquoi une absence posée depuis le téléphone n'apparaît pas
+        ici. Cette recherche parcourt le compte et relève qui porte vraiment
+        cet état — un seul appel, à lancer à la demande.
+      </p>
+      <form method="post" class="mb-3">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="inventaire">
+        <button class="btn btn-outline-secondary btn-sm">
+          <i class="bi bi-search me-1"></i>Chercher l'absence dans l'installation</button>
+      </form>
+
+      {% if inventaire %}
+        <p class="small text-secondary mb-2">
+          Recherche du {{ inventaire.ts|date:"d/m/Y H:i" }} —
+          {{ inventaire.appareils|length }} appareil(s) concerné(s).
+        </p>
+        {% for a in inventaire.appareils %}
+          <div class="border rounded p-2 mb-2">
+            <div class="fw-bold">{{ a.label }}
+              <span class="small text-faint">{{ a.widget }}</span></div>
+            <div class="small text-faint"><code>{{ a.url }}</code></div>
+            {% if a.etats %}
+              <table class="table table-sm small mb-2 mt-2">
+                {% for nom, valeur in a.etats.items %}
+                  <tr><td><code>{{ nom }}</code></td><td>{{ valeur }}</td></tr>
+                {% endfor %}
+              </table>
+            {% endif %}
+            {% if a.commandes %}
+              <div class="small">Commandes :
+                {% for c in a.commandes %}<code class="me-1">{{ c }}</code>{% endfor %}</div>
+            {% endif %}
+          </div>
+        {% empty %}
+          <p class="mb-0 text-faint small">Aucun appareil ne porte d'état d'absence.</p>
+        {% endfor %}
+      {% endif %}
+    </div>
+  </div>
+
+  {# ---------- Instantané : que change l'application Cozytouch ? ---------- #}
+  <div class="card mb-4">
+    <div class="card-header"><i class="bi bi-camera me-2"></i>Comparer les états</div>
+    <div class="card-body">
+      <p class="text-secondary small">
+        Pour savoir ce qu'écrit réellement l'application Cozytouch sur le
+        ballon : prendre un instantané, faire le réglage sur le téléphone, puis
+        cliquer sur <strong>Actualiser</strong> en haut de la page. Les états
+        qui ont changé entre les deux s'affichent ici.
+      </p>
+      <form method="post" class="mb-3">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="instantane">
+        <button class="btn btn-outline-secondary btn-sm">
+          <i class="bi bi-camera me-1"></i>Prendre un instantané</button>
+      </form>
+
+      {% if comparaison %}
+        <p class="small text-secondary mb-2">
+          Instantané du {{ comparaison.ts|date:"d/m/Y H:i:s" }} —
+          {{ comparaison.lignes|length }} état(s) modifié(s) depuis.
+        </p>
+        {% if comparaison.lignes %}
+          <table class="table table-sm small mb-0">
+            <thead><tr><th>État</th><th>Avant</th><th>Après</th></tr></thead>
+            <tbody>
+              {% for l in comparaison.lignes %}
+                <tr>
+                  <td><code>{{ l.nom }}</code></td>
+                  <td class="text-faint">{{ l.avant }}</td>
+                  <td>{{ l.apres }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="mb-0 text-faint small">Aucun état n'a changé depuis l'instantané.</p>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+
   {# ---------- États bruts ---------- #}
   <details class="mb-4">
     <summary class="text-secondary" style="cursor:pointer">États bruts du chauffe-eau</summary>

@@ -284,10 +284,29 @@ ces champs continuent donc de fonctionner.
 ### L'absence réglée ailleurs
 
 L'absence se pose aussi depuis l'application Cozytouch, et le ballon la
-termine seul à la date de retour. Homotic lit le même état : ces changements
-remontent donc, au rythme du cache du module — quelques minutes, ou tout de
-suite avec le bouton **Actualiser**. Chaque changement constaté donne une
-ligne dans le Journal, avec les états bruts qui ont bougé.
+termine seul à la date de retour.
+
+Attention : `get_state` ne lit pas le ballon, il lit ce que le **serveur
+Overkiz a mémorisé**. Les mesures sont poussées spontanément par la
+passerelle, mais un changement de configuration fait ailleurs peut n'arriver
+qu'après une demande explicite de rafraîchissement. Le bouton **Actualiser**
+et la tâche périodique la font ; les lectures ordinaires, non — c'est un
+appel de plus. Chaque changement constaté donne une ligne dans le Journal,
+avec les états bruts qui ont bougé.
+
+Si un réglage fait sur le téléphone n'apparaît toujours pas, la carte
+**Comparer les états** répond à la question « quel état a bougé, au juste ? » :
+prendre un instantané, faire le réglage sur le téléphone, cliquer sur
+Actualiser. La liste des états modifiés s'affiche, noms bruts compris.
+
+> **Le « mode vacances » de l'application n'est pas l'absence du ballon.**
+> Sur le téléphone, il met **toute l'installation** en absence ; l'action
+> d'Homotic ne met que le chauffe-eau. Les deux gestes ne touchent donc pas
+> le même équipement Overkiz, et une absence posée depuis l'application
+> n'apparaît pas dans les états du ballon. La carte **L'absence dans
+> l'installation** parcourt le compte et montre quel appareil porte
+> réellement cet état — première étape avant de savoir lire, et peut-être
+> écrire, l'absence à l'échelle de la maison.
 
 Attention à la lecture de cet état : **ni le mode ni les dates ne suffisent
 seuls**.

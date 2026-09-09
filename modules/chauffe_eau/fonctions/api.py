@@ -440,13 +440,44 @@ async def _decouvrir(client):
     return water.device_url, water.label
 
 
-async def _fetch_status(user, pwd, device_url=None):
+# Secondes d'attente entre la demande de rafraîchissement et la lecture :
+# la passerelle doit interroger le ballon et repousser ses états au serveur.
+ATTENTE_RAFRAICHISSEMENT = 4
+
+
+async def _rafraichir(client, device_url):
+    """Demande à la passerelle de renvoyer l'état réel de l'appareil.
+
+    ``get_state`` ne lit pas le ballon : il lit ce que le **serveur**
+    Overkiz a mémorisé. Les mesures (température, chauffe) sont poussées
+    spontanément par la passerelle, mais un changement de configuration
+    fait ailleurs — le mode absence réglé depuis l'application Cozytouch —
+    peut n'apparaître qu'après une demande explicite de rafraîchissement.
+
+    C'est un appel de plus : réservé aux lectures qui en valent la peine
+    (bouton Actualiser, tâche de fond), jamais à chaque lecture du cache.
+    """
+    for tentative in (
+        lambda: client.refresh_device_states(device_url),
+        lambda: client.refresh_states(),
+    ):
+        try:
+            await tentative()
+            break
+        except Exception:
+            continue  # méthode absente selon la version de pyoverkiz
+    await asyncio.sleep(ATTENTE_RAFRAICHISSEMENT)
+
+
+async def _fetch_status(user, pwd, device_url=None, rafraichir=False):
     client = _make_client(user, pwd)
     async with client:
         await client.login()
         libelle, states = None, None
         if device_url:
             try:
+                if rafraichir:
+                    await _rafraichir(client, device_url)
                 states = await client.get_state(device_url)
             except Exception:
                 # URL périmée, ou lecture ratée : on retombe sur la
@@ -455,15 +486,17 @@ async def _fetch_status(user, pwd, device_url=None):
                 states = None
         if not states:
             device_url, libelle = await _decouvrir(client)
+            if rafraichir:
+                await _rafraichir(client, device_url)
             states = await client.get_state(device_url)
         raw = {s.name: str(s.value) for s in states}
         return {"label": libelle, "device_url": device_url, "raw": raw}
 
 
-def get_status():
+def get_status(rafraichir=False):
     user, pwd = _require_credentials()
     url, libelle = _appareil_memorise()  # avant l'async : lecture en base
-    result = asyncio.run(_fetch_status(user, pwd, url))
+    result = asyncio.run(_fetch_status(user, pwd, url, rafraichir))
     if not result.get("label"):
         result["label"] = libelle
     _memoriser_appareil(result.get("device_url"), result.get("label"))
@@ -751,6 +784,127 @@ def _refresh_after_command():
         _RELECTURE_APRES_COMMANDE = False
 
 
+# ----------------------------------------------------------------------
+# Où vit l'absence dans l'installation ?
+# ----------------------------------------------------------------------
+#
+# Constat du 2026-09-09 : le « mode vacances » de l'application Cozytouch
+# met TOUTE l'installation en absence, pas seulement le ballon. Il n'est
+# donc pas porté par l'appareil chauffe-eau — les états lus ici ne bougent
+# pas — mais par un autre équipement du compte (passerelle, objet « site »).
+# Le module, lui, n'écrit l'absence que sur le ballon : les deux gestes ne
+# font pas la même chose.
+#
+# Avant de coder quoi que ce soit à l'aveugle, il faut savoir QUI porte cet
+# état. Cette recherche parcourt l'installation entière et relève, pour
+# chaque appareil, les états et les commandes qui parlent d'absence. Un
+# seul « get_setup » — à lancer depuis le bouton du paramétrage, pas
+# automatiquement.
+
+async def _inventaire_absence(user, pwd):
+    client = _make_client(user, pwd)
+    async with client:
+        await client.login()
+        setup = await client.get_setup()
+        trouves = []
+        for appareil in setup.devices:
+            etats = {
+                etat.name: str(etat.value)
+                for etat in (appareil.states or [])
+                if "absence" in str(etat.name).lower()
+            }
+            commandes = sorted({
+                commande.command_name
+                for commande in appareil.definition.commands
+                if "absence" in str(commande.command_name).lower()
+            })
+            if etats or commandes:
+                trouves.append({
+                    "label": appareil.label,
+                    "url": appareil.device_url,
+                    "widget": str(appareil.widget or ""),
+                    "etats": etats,
+                    "commandes": commandes,
+                })
+        return trouves
+
+
+def chercher_absence_installation():
+    """Quels appareils du compte portent un état ou une commande d'absence."""
+    user, pwd = _require_credentials()
+    trouves = asyncio.run(_inventaire_absence(user, pwd))
+    set_setting(
+        "inventaire_absence",
+        json.dumps({"ts": datetime.now().isoformat(), "appareils": trouves}),
+        module=MODULE,
+    )
+    resume = ", ".join(
+        f"{a['label']} ({len(a['etats'])} état(s), {len(a['commandes'])} commande(s))"
+        for a in trouves
+    )
+    journal(
+        f"Recherche de l'absence dans l'installation : {resume or 'aucun appareil trouvé'}",
+        module=MODULE,
+    )
+    return trouves
+
+
+def inventaire_absence():
+    """Le dernier inventaire relevé, pour l'affichage."""
+    brut = get_setting("inventaire_absence", module=MODULE, default="")
+    if not brut:
+        return None
+    try:
+        photo = json.loads(brut)
+    except ValueError:
+        return None
+    return {"ts": parse_iso(photo.get("ts")), "appareils": photo.get("appareils") or []}
+
+
+# ----------------------------------------------------------------------
+# Instantané des états — outil de diagnostic
+# ----------------------------------------------------------------------
+#
+# Quand un réglage fait sur l'application Cozytouch n'apparaît pas ici, la
+# question est : « quel état a bougé, au juste ? ». On garde donc une photo
+# de tous les états bruts, et on affiche la différence avec la lecture
+# courante. Marche à suivre : instantané → réglage sur le téléphone →
+# Actualiser. Ce que l'application écrit apparaît alors noir sur blanc.
+
+def prendre_instantane():
+    """Photographie l'ensemble des états bruts du ballon."""
+    data, ts, erreur = get_status_cached(force=True, rafraichir=True)
+    if data is None:
+        raise RuntimeError(erreur or "lecture du ballon impossible")
+    set_setting(
+        "instantane",
+        json.dumps({"ts": (ts or datetime.now()).isoformat(), "raw": data.get("raw") or {}}),
+        module=MODULE,
+    )
+    journal(f"Instantané des états pris ({len(data.get('raw') or {})} états)", module=MODULE)
+    return ts
+
+
+def comparer_instantane(data):
+    """Ce qui a changé depuis l'instantané : liste de (nom, avant, après)."""
+    brut = get_setting("instantane", module=MODULE, default="")
+    if not brut:
+        return None
+    try:
+        photo = json.loads(brut)
+    except ValueError:
+        return None
+
+    avant = photo.get("raw") or {}
+    apres = (data or {}).get("raw") or {}
+    lignes = [
+        {"nom": nom, "avant": avant.get(nom, "—"), "apres": apres.get(nom, "—")}
+        for nom in sorted(set(avant) | set(apres))
+        if str(avant.get(nom)) != str(apres.get(nom))
+    ]
+    return {"ts": parse_iso(photo.get("ts")), "lignes": lignes}
+
+
 def _etats_absence(data):
     """Les états bruts qui parlent d'absence, pour comparer deux relevés."""
     raw = (data or {}).get("raw") or {}
@@ -805,8 +959,13 @@ def _suivre_absence(data, precedent=None):
 # Cache en base (même principe que le module tempo)
 # ----------------------------------------------------------------------
 
-def get_status_cached(force=False, ttl_minutes=15):
-    """Statut du ballon : (data, ts, erreur). Sert le cache périmé si l'API tombe."""
+def get_status_cached(force=False, ttl_minutes=15, rafraichir=False):
+    """Statut du ballon : (data, ts, erreur). Sert le cache périmé si l'API tombe.
+
+    ``rafraichir`` demande d'abord à la passerelle de repousser l'état réel
+    de l'appareil (voir ``_rafraichir``) : indispensable pour voir un
+    réglage fait ailleurs, mais c'est un appel de plus.
+    """
     now = datetime.now()
     raw = get_setting("cache_status", module=MODULE)
     cached_data, cached_ts = None, None
@@ -823,7 +982,7 @@ def get_status_cached(force=False, ttl_minutes=15):
             return cached_data, cached_ts, ""
 
     try:
-        data = get_status()
+        data = get_status(rafraichir=rafraichir)
     except Exception as exc:
         journal(f"Erreur Cozytouch : {exc}", module=MODULE, level=LogEntry.ERROR)
         if cached_data is not None:
@@ -849,6 +1008,13 @@ def tache_actualiser():
     Sans forçage, l'appel reste un filet : il rafraîchit quand même si le
     cache a dépassé son délai normal. Un suivi en panne ne fige donc pas
     les mesures.
+
+    Dans les deux cas, cette tâche demande à la passerelle de repousser
+    l'état réel du ballon. C'est le seul moment où un réglage fait
+    ailleurs — une absence programmée depuis l'application Cozytouch —
+    peut arriver jusqu'ici sans qu'on ait cliqué sur Actualiser. Quand le
+    suivi tourne, on se contente de la demande : c'est lui qui lira le
+    résultat quelques minutes plus tard, sans lecture supplémentaire ici.
     """
     if not configured():
         return
@@ -858,4 +1024,39 @@ def tache_actualiser():
         suivi_tourne = suivi_actif()
     except Exception:
         suivi_tourne = False
-    get_status_cached(force=not suivi_tourne)
+
+    if suivi_tourne:
+        demander_rafraichissement()
+        return
+    get_status_cached(force=True, rafraichir=True)
+
+
+def demander_rafraichissement():
+    """Demande le rafraîchissement des états, sans les lire.
+
+    Utile quand une autre tâche va lire juste après : la demande seule
+    coûte une requête, la lecture complète en coûterait une de plus.
+    Silencieuse en cas d'échec — c'est un confort, pas une opération dont
+    dépend le module.
+    """
+    try:
+        user, pwd = _require_credentials()
+        url, _libelle = _appareil_memorise()
+        if not url:
+            return False
+        asyncio.run(_demander(user, pwd, url))
+        return True
+    except Exception as exc:
+        journal(
+            f"Rafraîchissement des états impossible : {exc}",
+            module=MODULE,
+            level=LogEntry.WARNING,
+        )
+        return False
+
+
+async def _demander(user, pwd, device_url):
+    client = _make_client(user, pwd)
+    async with client:
+        await client.login()
+        await _rafraichir(client, device_url)
