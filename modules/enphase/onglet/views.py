@@ -17,12 +17,48 @@ from core.services import get_setting, journal, set_setting
 from ..fonctions import affichage, api, cloud, journee
 
 
+def _enregistrer(request, champs):
+    """Écrit les champs renseignés, conserve ceux laissés vides.
+
+    ``champs`` associe le nom du champ du formulaire à son libellé et à son
+    caractère sensible : ``{"cloud_api_key": ("API key", False)}``.
+
+    Le mot de passe et le client secret se comportaient déjà ainsi — un champ
+    vide voulait dire « inchangé ». Les autres étaient écrits tels quels, si
+    bien qu'un formulaire renvoyé à vide effaçait sans un mot une clé API et
+    un client ID qu'il avait fallu aller chercher dans le compte développeur
+    Enphase. Conserver est le moindre mal : une valeur se remplace en la
+    retapant, elle ne se retrouve pas quand elle a disparu.
+
+    Retourne les libellés des champs conservés, pour le dire à l'utilisateur
+    plutôt que de le laisser croire qu'il vient de tout effacer.
+    """
+    conserves = []
+    for champ, (libelle, sensible) in champs.items():
+        valeur = request.POST.get(champ, "").strip()
+        if valeur:
+            set_setting(champ, valeur, module=api.MODULE, secret=sensible)
+        elif get_setting(champ, module=api.MODULE, default=""):
+            conserves.append(libelle)
+    return conserves
+
+
+def _signaler_conserves(request, conserves):
+    if conserves:
+        messages.info(
+            request,
+            "Champ(s) laissé(s) vide(s), valeur précédente conservée : "
+            + ", ".join(conserves) + ".",
+        )
+
+
 def _save_params(request):
-    for key in ("username", "envoy_serial", "envoy_host"):
-        set_setting(key, request.POST.get(key, "").strip(), module=api.MODULE)
-    pwd = request.POST.get("password", "").strip()
-    if pwd:
-        set_setting("password", pwd, module=api.MODULE, secret=True)
+    conserves = _enregistrer(request, {
+        "username": ("identifiant", False),
+        "envoy_serial": ("numéro de série", False),
+        "envoy_host": ("adresse de l'Envoy", False),
+        "password": ("mot de passe", True),
+    })
 
     raw = request.POST.get("tache_actualiser_minutes", "").strip()
     try:
@@ -32,6 +68,7 @@ def _save_params(request):
 
     journal("Paramètres mis à jour", module=api.MODULE)
     messages.success(request, "Paramètres Enphase enregistrés.")
+    _signaler_conserves(request, conserves)
 
 
 def _display_context(data, compact=False):
@@ -81,13 +118,15 @@ def onglet(request):
                     cloud.get_consumption_curve_cached(force=True)
                 messages.success(request, "Mesures actualisées.")
             elif action == "cloud_params":
-                for key in ("cloud_api_key", "cloud_client_id", "cloud_system_id"):
-                    set_setting(key, request.POST.get(key, "").strip(), module=api.MODULE)
-                secret = request.POST.get("cloud_client_secret", "").strip()
-                if secret:
-                    set_setting("cloud_client_secret", secret, module=api.MODULE, secret=True)
+                conserves = _enregistrer(request, {
+                    "cloud_api_key": ("API key", False),
+                    "cloud_client_id": ("client ID", False),
+                    "cloud_client_secret": ("client secret", True),
+                    "cloud_system_id": ("system ID", False),
+                })
                 journal("Paramètres cloud mis à jour", module=api.MODULE)
                 messages.success(request, "Paramètres cloud enregistrés.")
+                _signaler_conserves(request, conserves)
             elif action == "cloud_link":
                 code = request.POST.get("code", "").strip()
                 if not code:

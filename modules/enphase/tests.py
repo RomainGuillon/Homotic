@@ -18,9 +18,9 @@ import json
 from datetime import datetime
 from unittest import mock
 
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 
-from core.services import set_setting
+from core.services import get_setting, set_setting
 
 from .fonctions import api
 
@@ -93,3 +93,44 @@ class CumulsDuJour(TestCase):
 
         e = self._lire("meters2", 6000.0, 9000.0, 3000.0)
         self.assertEqual(e["production_wh_today"], 5000.0)
+
+
+class ParametresConserves(TestCase):
+    """Un champ de formulaire laissé vide ne doit pas effacer la valeur en place.
+
+    Le paramétrage cloud d'Enphase ne se retrouve pas d'un clic : la clé API
+    et le client ID se vont chercher dans le compte développeur. Un
+    enregistrement à vide qui les effaçait en silence coûtait bien plus cher
+    que le confort d'un champ qu'on peut vider.
+    """
+
+    CHAMPS = {
+        "cloud_api_key": ("API key", False),
+        "cloud_client_secret": ("client secret", True),
+    }
+
+    def _enregistrer(self, donnees):
+        from .onglet.views import _enregistrer
+
+        return _enregistrer(RequestFactory().post("/", donnees), self.CHAMPS)
+
+    def test_champ_renseigne_est_ecrit(self):
+        self._enregistrer({"cloud_api_key": "cle-abc"})
+        self.assertEqual(get_setting("cloud_api_key", module=api.MODULE), "cle-abc")
+
+    def test_champ_vide_conserve_la_valeur_precedente(self):
+        self._enregistrer({"cloud_api_key": "cle-abc"})
+        conserves = self._enregistrer({"cloud_api_key": "   "})
+        self.assertEqual(get_setting("cloud_api_key", module=api.MODULE), "cle-abc")
+        self.assertIn("API key", conserves)
+
+    def test_champ_vide_sans_valeur_precedente_ne_signale_rien(self):
+        self.assertEqual(self._enregistrer({"cloud_api_key": ""}), [])
+
+    def test_le_secret_reste_marque_sensible(self):
+        from core.models import Setting
+
+        self._enregistrer({"cloud_client_secret": "chut"})
+        self.assertTrue(
+            Setting.objects.get(module=api.MODULE, key="cloud_client_secret").secret
+        )
