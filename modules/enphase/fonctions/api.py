@@ -270,43 +270,112 @@ def _save_state(state):
     set_setting("daily_state", json.dumps(state), module=MODULE)
 
 
+def _delta(releve, reference):
+    """Écart entre un relevé et une référence, clé à clé.
+
+    Seules les grandeurs présentes des deux côtés sont comparées : la pince
+    réseau expose ``imp``/``exp``, production.json pas toujours.
+    """
+    return {k: releve[k] - reference[k] for k in releve if k in reference}
+
+
+def _reference_utilisable(base):
+    """Une référence n'a de sens que si elle porte les trois grandeurs de base.
+
+    ``imp``/``exp`` peuvent manquer — le calcul sait s'en passer — mais une
+    référence amputée de ``prod``, ``conso`` ou ``net`` ferait échouer le
+    calcul du jour au lieu de simplement le dégrader.
+    """
+    return isinstance(base, dict) and all(k in base for k in ("prod", "conso", "net"))
+
+
+def _migrer_etat(state):
+    """Convertit un état à référence unique vers le format à référence par source.
+
+    Les versions antérieures ne gardaient qu'une référence — celle de la
+    source du moment — et la jetaient à chaque bascule. On la reprend ici au
+    nom de la source qui l'a produite : la journée en cours n'est pas réparée
+    pour autant, mais elle cesse d'être remise à zéro.
+    """
+    if not state or "bases" in state:
+        return state
+    source = state.get("source") or "production_json"
+    base = state.get("base") or {}
+    if not _reference_utilisable(base):
+        return None  # état tronqué : autant repartir sur une référence neuve
+    return {
+        "date": state.get("date"),
+        "bases": {source: base},
+        "lasts": {source: state.get("last", base)},
+        "derniere_source": source,
+    }
+
+
+def _cumuls_en_cours(state):
+    """Ce que la journée a déjà compté, vu par la dernière source utilisée.
+
+    C'est ce total qui permet de caler la référence d'une source prenant le
+    relais en cours de journée, au lieu de la faire repartir de zéro.
+    """
+    source = state.get("derniere_source")
+    base = state.get("bases", {}).get(source)
+    last = state.get("lasts", {}).get(source)
+    if not base or not last:
+        return {}
+    return _delta(last, base)
+
+
 def get_energy():
-    """Instantané + cumuls du jour (lifetime - référence de début de journée)."""
+    """Instantané + cumuls du jour (lifetime - référence de début de journée).
+
+    Chaque source de mesure — ``meters``, ``meters2``, ``production_json`` —
+    garde sa propre référence : leurs compteurs cumulés ne partent pas du même
+    zéro, et comparer le relevé de l'une à la référence de l'autre donnerait
+    une journée aberrante, souvent en mégawattheures.
+
+    Mais une source qui prend le relais en cours de journée ne repart pas de
+    zéro pour autant : sa référence est calée sur ce que la journée a déjà
+    compté. Sans cela, un Envoy qui rend la main en timeout quelques secondes
+    efface toute la journée au moment du repli, puis de nouveau au retour — et
+    le tableau de bord n'affiche plus que les minutes écoulées depuis la
+    dernière bascule.
+    """
     m = _read_meters()
     today = datetime.now().strftime("%Y-%m-%d")
+    source = m.get("source") or "production_json"
 
-    state = _load_state()
     current = {"prod": m["prod_life"], "conso": m["conso_life"], "net": m["net_life"]}
     if "imp_life" in m and "exp_life" in m:
         current["imp"] = m["imp_life"]
         current["exp"] = m["exp_life"]
 
-    # Les compteurs cumulés des pinces et ceux des micro-onduleurs ne partent
-    # pas du même zéro : comparer le relevé d'une source à une référence prise
-    # sur l'autre donnerait une journée aberrante (souvent des mégawattheures).
-    # Un changement de source repart donc sur une référence neuve, quitte à
-    # perdre le début de la journée en cours.
-    # Un état sans source vient d'une version antérieure, où tout passait par
-    # production.json : il faut le traiter comme un changement, sinon les
-    # cumuls du jour se calculeraient contre une référence de l'autre source.
-    source = m.get("source", "")
-    if state and state.get("source") != source:
-        journal(
-            f"Source des mesures : {state.get('source') or 'production_json'} "
-            f"→ {source}. Cumuls du jour repartis de zéro.", module=MODULE,
-        )
-        state = None
-
+    state = _migrer_etat(_load_state())
     if not state or state.get("date") != today:
-        # Nouveau jour : référence = dernier relevé de la veille, sinon l'actuel
-        base = state.get("last", current) if state else current
-        state = {"date": today, "base": base, "last": current}
-    else:
-        state["last"] = current
-    state["source"] = source
+        # Nouveau jour : chaque source repart de son dernier relevé de la
+        # veille, celui qui approche le mieux son compteur à minuit.
+        veille = (state or {}).get("lasts", {})
+        state = {
+            "date": today,
+            "bases": {s: r for s, r in veille.items() if _reference_utilisable(r)},
+            "lasts": {},
+            "derniere_source": "",
+        }
+
+    if source not in state["bases"]:
+        deja = _cumuls_en_cours(state)
+        state["bases"][source] = {k: current[k] - deja.get(k, 0.0) for k in current}
+        if deja:
+            journal(f"Source des mesures : bascule vers {source}, référence du "
+                    f"jour calée sur les cumuls déjà comptés.", module=MODULE)
+        else:
+            journal(f"Source des mesures : {source}. Première référence du jour, "
+                    f"les cumuls partent de ce relevé.", module=MODULE)
+
+    state["lasts"][source] = current
+    state["derniere_source"] = source
     _save_state(state)
 
-    base = state["base"]
+    base = state["bases"][source]
     production_today = max(current["prod"] - base["prod"], 0.0)
     consumption_today = max(current["conso"] - base["conso"], 0.0)
     grid_today = current["net"] - base["net"]
