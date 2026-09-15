@@ -113,9 +113,12 @@ def onglet(request):
             elif action == "refresh":
                 api.get_energy_cached(force=True)
                 if cloud.cloud_configured():
-                    cloud.get_daily_totals_cached(force=True)
-                    cloud.get_production_curve_cached(force=True)
-                    cloud.get_consumption_curve_cached(force=True)
+                    # Un seul relevé cloud : cumuls du jour et courbes en
+                    # sortent ensemble. Forcer les trois séparément, c'était
+                    # payer trois fois le quota pour la même donnée.
+                    _jour, _jts, cerr = cloud.jour_cached(force=True)
+                    if cerr:
+                        messages.warning(request, f"Cloud Enlighten : {cerr}")
                 messages.success(request, "Mesures actualisées.")
             elif action == "cloud_params":
                 conserves = _enregistrer(request, {
@@ -124,6 +127,16 @@ def onglet(request):
                     "cloud_client_secret": ("client secret", True),
                     "cloud_system_id": ("system ID", False),
                 })
+                raw = request.POST.get("cloud_intervalle_minutes", "").strip()
+                if raw:
+                    try:
+                        set_setting(
+                            "cloud_intervalle_minutes",
+                            str(max(cloud.INTERVALLE_PLANCHER_MIN, int(raw))),
+                            module=api.MODULE,
+                        )
+                    except ValueError:
+                        pass
                 journal("Paramètres cloud mis à jour", module=api.MODULE)
                 messages.success(request, "Paramètres cloud enregistrés.")
                 _signaler_conserves(request, conserves)
@@ -179,6 +192,9 @@ def onglet(request):
             "system_id": ccfg["system_id"],
             "linked": cloud.cloud_configured(),
             "auth_url": auth_url,
+            "intervalle": cloud.intervalle_minutes(),
+            "plancher": cloud.INTERVALLE_PLANCHER_MIN,
+            "etat": cloud.etat_cloud(),
         },
     }
     if data:

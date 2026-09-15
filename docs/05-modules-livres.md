@@ -18,7 +18,10 @@ Chaque module se paramètre dans son propre onglet, section « Paramétrage ».
 
 ## Énergie (Enphase)
 
-Interroge la passerelle **Envoy en local** — pas de quota, pas de cloud.
+Interroge la passerelle **Envoy en local** — sans quota. Le cloud
+Enlighten n'intervient qu'en option, pour le bloc « La journée » et les
+courbes 15 min, et lui est plafonné : voir *Le cloud Enlighten, et son
+quota* plus bas.
 
 ![Onglet Énergie](images/05-energie.png)
 
@@ -69,6 +72,57 @@ Sans lui, une Envoy injoignable faisait attendre chaque affichage du tableau
 de bord le temps des délais d'attente, et remplissait le Journal de milliers
 de lignes identiques. Tant que la panne dure, un seul rappel est écrit par
 heure.
+
+### Le cloud Enlighten, et son quota
+
+Le module sait en plus interroger l'**API cloud Enlighten** (v4), liée dans
+l'onglet Énergie. Elle apporte deux choses que l'Envoy ne donne pas : les
+cumuls du jour consolidés par Enphase, et le **détail par pas de 15 minutes**
+— c'est lui qui permet de chiffrer la journée tranche par tranche au lieu
+d'appliquer un prix moyen. Sans liaison cloud, le bloc « La journée » retombe
+sur les cumuls locaux et le coût s'affiche sans détail. Rien ne casse.
+
+Mais le cloud, contrairement à l'Envoy, **se paie**. Le plan gratuit du
+portail développeur Enphase (*Watt*) plafonne à **1 000 requêtes par mois**,
+soit environ 33 par jour. Trois règles en découlent, à ne pas défaire :
+
+- **Un relevé, deux appels.** Les cumuls, la courbe de production et celle de
+  consommation sortent d'un seul couple d'appels aux deux séries
+  télémétriques, mis en cache ensemble. Tout le reste s'en déduit.
+- **Une cadence propre au cloud**, réglable dans le paramétrage cloud de
+  l'onglet (« Relevé cloud toutes les… »), 120 minutes par défaut, plancher à
+  30. Elle est **volontairement distincte** de la cadence de l'Envoy : les
+  scénarios ont besoin des mesures locales à la minute, le quota cloud ne le
+  supporterait pas. Ne jamais remettre les deux sur le même réglage.
+- **Une pause de 15 minutes après un appel en erreur.** Un échec n'écrit
+  aucun cache : sans cette pause, chaque affichage de page repart interroger
+  l'API. Le paramétrage affiche la date du dernier relevé et, le cas échéant,
+  jusqu'à quand les appels sont suspendus.
+
+Le relevé est déclenché par l'affichage d'une page, pas par une tâche de
+fond : si personne n'ouvre le tableau de bord, aucun appel n'est consommé.
+
+> **Avant d'ajouter un appel périodique à une API plafonnée**, poser le
+> calcul : *appels par cycle × cycles par jour × 30*. C'est la règle du
+> module Capteurs, et c'est faute de l'avoir appliquée ici que le quota d'un
+> mois a été épuisé en quelques heures.
+
+### Si le journal se remplit de 401
+
+Le jeton d'accès OAuth est renouvelé sur son âge (23 h), mais **aussi dès
+qu'un appel répond 401** : la requête est alors rejouée une fois avec un
+jeton frais. Régénérer la clé API ou refaire l'autorisation côté portail
+Enphase invalide le jeton en cours avant la fin de son délai — sans ce
+rejeu, le module repasserait indéfiniment un jeton mort, et un redémarrage
+du service n'y changerait rien.
+
+Un 401 qui **persiste après renouvellement** ne vient pas du jeton : le
+refresh token est invalidé lui aussi, et il faut refaire la liaison OAuth
+depuis l'onglet Énergie. Le message d'erreur le dit.
+
+À vérifier au passage : ni la clé API, ni le refresh token, ni le code
+d'autorisation n'apparaissent dans le Journal — il est lisible depuis
+l'interface web, les valeurs y sont masquées.
 
 ## Solaire (Solcast)
 

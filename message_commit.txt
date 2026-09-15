@@ -1,0 +1,36 @@
+Enphase cloud : sortir de la boucle de 401 et tenir le quota
+
+Le jeton d'accès OAuth n'était renouvelé que sur son âge
+(obtained_at + ACCESS_TTL_S). La régénération de la clé API du 15/09 l'a
+invalidé avant la fin de ce délai : le module a repassé le même jeton mort
+pendant des heures, quatre redémarrages du service n'y ayant rien changé.
+Vérifié en curl sur la VM — une clé bidon et un system_id bidon donnaient la
+même réponse que les vrais, ni l'un ni l'autre n'étant évalué.
+
+- Sur 401, le jeton est renouvelé et la requête rejouée une fois. Un 401 qui
+  persiste après renouvellement renvoie un message qui dit quoi faire :
+  refaire la liaison OAuth depuis l'onglet.
+- Clé API, refresh token et code d'autorisation masqués dans tout message
+  journalisé. Les exceptions de requests reprenaient l'URL complète, donc la
+  clé en clair dans un journal lisible depuis le web.
+- Un relevé cloud coûte désormais 2 appels au lieu de 6 : les deux séries
+  télémétriques 15 min portent déjà les cumuls et les courbes. /summary et
+  /consumption_lifetime sont retirés, leurs totaux se déduisent des
+  intervalles — et deviennent cohérents avec le coût par tranche.
+- Cadence cloud séparée de celle de l'Envoy : réglage
+  cloud_intervalle_minutes, 120 min par défaut, plancher 30. L'Envoy est
+  local, gratuit et les scénarios en dépendent : sa cadence ne bouge pas.
+- Pause de 15 min après un appel en erreur. C'était le vrai brûleur de
+  quota : un échec n'écrivait aucun cache, donc chaque affichage de page
+  repartait interroger l'API. Plus un délai plancher de 60 s entre deux
+  appels réels, même forcés par le bouton Actualiser.
+
+720 appels/mois attendus à 120 min, contre 1 000 autorisés par le plan Watt.
+
+Tests dans modules/enphase/tests.py (relevé unique, cache partagé, plancher
+d'intervalle, pause après échec, rejeu sur 401, masquage des secrets).
+Documentation : deux sections ajoutées à docs/05-modules-livres.md — les
+traductions docs/en/ et docs/de/ sont donc périmées sur ce point.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_013pryNZyDBGoEcpYakvSgXj

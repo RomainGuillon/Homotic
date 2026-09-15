@@ -170,6 +170,32 @@
                      placeholder="auto-détecté à la liaison">
             </div>
           </div>
+          <div class="row g-3 mb-3">
+            <div class="col-12 col-md-3">
+              <label class="form-label">Relevé cloud toutes les… (min)</label>
+              <input type="number" name="cloud_intervalle_minutes" class="form-control"
+                     min="{{ cloud_params.plancher }}" value="{{ cloud_params.intervalle }}">
+              <div class="form-text">Distinct de la cadence de l'Envoy ci-dessus :
+                l'Envoy est local et gratuit, le cloud est plafonné à
+                <strong>1 000 requêtes/mois</strong> (plan Watt). Chaque relevé
+                coûte 2 appels, soit {{ cloud_params.intervalle }} min &rarr; environ
+                720 appels/mois à 120 min. Plancher {{ cloud_params.plancher }} min.</div>
+            </div>
+            <div class="col-12 col-md-9">
+              <div class="form-text">
+                {% if cloud_params.etat.dernier_releve %}
+                  Dernier relevé cloud : {{ cloud_params.etat.dernier_releve|date:"d/m/Y H:i" }}.
+                {% else %}
+                  Aucun relevé cloud en cache.
+                {% endif %}
+                {% if cloud_params.etat.suspendu_jusqu_a %}
+                  <span class="text-danger">Appels suspendus jusqu'à
+                  {{ cloud_params.etat.suspendu_jusqu_a|date:"H:i" }} —
+                  {{ cloud_params.etat.derniere_erreur }}</span>
+                {% endif %}
+              </div>
+            </div>
+          </div>
           <button class="btn btn-outline-primary btn-sm">Enregistrer les paramètres cloud</button>
         </form>
 
