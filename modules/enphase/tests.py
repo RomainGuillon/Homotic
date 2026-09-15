@@ -15,7 +15,7 @@ journée de zéro — le défaut qui, le 11 septembre 2026, a fait afficher
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest import mock
 
 from django.test import RequestFactory, TestCase
@@ -225,6 +225,44 @@ class CloudQuota(TestCase):
                                side_effect=AssertionError("appel interdit")) as get:
             self.cloud.jour_cached(force=True)
         self.assertEqual(get.call_count, 0)
+
+    def test_un_429_suspend_longtemps_et_survit_au_redemarrage(self):
+        """Le quota est mensuel : une pause d'un quart d'heure n'y suffit pas."""
+        with mock.patch.object(self.cloud, "_get",
+                               side_effect=self.cloud._QuotaDepasse("plan Watt")):
+            _d, _t, err = self.cloud.jour_cached()
+        self.assertIn("Quota mensuel", err)
+
+        fin = self.cloud._pause_quota()
+        self.assertIsNotNone(fin)  # en base, pas seulement en mémoire
+        self.assertGreater(fin - datetime.now(),
+                           timedelta(hours=self.cloud.BACKOFF_QUOTA_H - 1))
+
+        self._reset()  # comme après un redémarrage du service
+        with mock.patch.object(self.cloud, "_get",
+                               side_effect=AssertionError("appel interdit")) as get:
+            self.cloud.jour_cached()
+        self.assertEqual(get.call_count, 0)
+
+    def test_un_forcage_ne_contourne_pas_la_pause_quota(self):
+        """Cliquer « Actualiser » ne doit pas creuser le trou du mois suivant."""
+        set_setting(self.cloud.PAUSE_QUOTA,
+                    (datetime.now() + timedelta(hours=6)).isoformat(),
+                    module=api.MODULE)
+        with mock.patch.object(self.cloud, "_get",
+                               side_effect=AssertionError("appel interdit")) as get:
+            _d, _t, err = self.cloud.jour_cached(force=True)
+        self.assertEqual(get.call_count, 0)
+        self.assertIn("Quota mensuel", err)
+
+    def test_un_succes_leve_la_pause_quota(self):
+        set_setting(self.cloud.PAUSE_QUOTA,
+                    (datetime.now() - timedelta(minutes=1)).isoformat(),
+                    module=api.MODULE)
+        with mock.patch.object(self.cloud, "_get", side_effect=self._payloads()):
+            _d, _t, err = self.cloud.jour_cached()
+        self.assertEqual(err, "")
+        self.assertIsNone(self.cloud._pause_quota())
 
     def test_l_intervalle_a_un_plancher(self):
         set_setting("cloud_intervalle_minutes", "1", module=api.MODULE)

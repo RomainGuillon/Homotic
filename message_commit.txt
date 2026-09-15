@@ -1,4 +1,4 @@
-Enphase cloud : sortir de la boucle de 401 et tenir le quota
+Enphase cloud : rejeu sur 401, secrets masqués, et quota tenu
 
 Le jeton d'accès OAuth n'était renouvelé que sur son âge
 (obtained_at + ACCESS_TTL_S). La régénération de la clé API du 15/09 l'a
@@ -24,11 +24,20 @@ même réponse que les vrais, ni l'un ni l'autre n'étant évalué.
   quota : un échec n'écrivait aucun cache, donc chaque affichage de page
   repartait interroger l'API. Plus un délai plancher de 60 s entre deux
   appels réels, même forcés par le bouton Actualiser.
+- Un 429 est traité à part : pause de 12 h, enregistrée en base et non en
+  mémoire, car le compteur du plan est mensuel et un redémarrage du service
+  ne le remet pas à zéro. C'est le seul cas où « Actualiser » n'appelle pas.
 
 720 appels/mois attendus à 120 min, contre 1 000 autorisés par le plan Watt.
 
-Tests dans modules/enphase/tests.py (relevé unique, cache partagé, plancher
-d'intervalle, pause après échec, rejeu sur 401, masquage des secrets).
+Le module ne rend plus de 401 depuis le déploiement, seulement des 429 : le
+quota du mois est consommé, l'authentification fonctionne. Le bloc « La
+journée » reste sur les cumuls locaux de l'Envoy jusqu'au renouvellement du
+plan.
+
+Tests dans modules/enphase/tests.py : relevé unique, cache partagé, plancher
+d'intervalle, pause après échec, pause quota persistée et non contournable,
+rejeu sur 401, masquage des secrets.
 Documentation : deux sections ajoutées à docs/05-modules-livres.md — les
 traductions docs/en/ et docs/de/ sont donc périmées sur ce point.
 

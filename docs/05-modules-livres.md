@@ -84,7 +84,7 @@ sur les cumuls locaux et le coût s'affiche sans détail. Rien ne casse.
 
 Mais le cloud, contrairement à l'Envoy, **se paie**. Le plan gratuit du
 portail développeur Enphase (*Watt*) plafonne à **1 000 requêtes par mois**,
-soit environ 33 par jour. Trois règles en découlent, à ne pas défaire :
+soit environ 33 par jour. Quatre règles en découlent, à ne pas défaire :
 
 - **Un relevé, deux appels.** Les cumuls, la courbe de production et celle de
   consommation sortent d'un seul couple d'appels aux deux séries
@@ -98,6 +98,12 @@ soit environ 33 par jour. Trois règles en découlent, à ne pas défaire :
   aucun cache : sans cette pause, chaque affichage de page repart interroger
   l'API. Le paramétrage affiche la date du dernier relevé et, le cas échéant,
   jusqu'à quand les appels sont suspendus.
+- **Une pause de 12 heures sur `429`, enregistrée en base.** Le compteur du
+  plan est *mensuel* : réessayer un quart d'heure plus tard ne peut rien
+  donner, et chaque tentative risque d'être décomptée du mois suivant. La
+  pause est en base et non en mémoire, parce que redémarrer le service ne
+  remet pas le compteur à zéro. Un forçage par le bouton « Actualiser » ne la
+  contourne pas — c'est le seul cas où le bouton refuse d'agir.
 
 Le relevé est déclenché par l'affichage d'une page, pas par une tâche de
 fond : si personne n'ouvre le tableau de bord, aucun appel n'est consommé.
@@ -106,6 +112,13 @@ fond : si personne n'ouvre le tableau de bord, aucun appel n'est consommé.
 > calcul : *appels par cycle × cycles par jour × 30*. C'est la règle du
 > module Capteurs, et c'est faute de l'avoir appliquée ici que le quota d'un
 > mois a été épuisé en quelques heures.
+
+Un `429 Usage limit exceeded for plan Watt` au Journal ne se corrige pas : le
+quota est consommé, il n'y a qu'à attendre le renouvellement du plan — qui
+tombe à la date d'anniversaire de l'abonnement développeur, pas au 1er du
+mois. Le bloc « La journée » retombe entre-temps sur les cumuls locaux de
+l'Envoy, et le coût perd son détail par tranche. Tout le reste du module, qui
+est local, continue normalement.
 
 ### Si le journal se remplit de 401
 

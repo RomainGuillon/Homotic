@@ -14,7 +14,7 @@ l'autorisation.
 
 **Ce module est soumis à un quota mensuel** (plan Watt du portail développeur
 Enphase : 1 000 requêtes/mois, soit ~33 par jour). Contrairement à l'Envoy,
-qui est local et gratuit, chaque appel ici se paie. Trois garde-fous, à ne pas
+qui est local et gratuit, chaque appel ici se paie. Quatre garde-fous, à ne pas
 retirer sans refaire le calcul ``appels/cycle × cycles/jour × 30`` :
 
 - **un seul relevé pour tout** : les cumuls du jour, la courbe de production
@@ -26,7 +26,11 @@ retirer sans refaire le calcul ``appels/cycle × cycles/jour × 30`` :
   minute, le cloud ne le supporterait pas ;
 - **une pause après échec** : sans elle, un appel en erreur n'écrit aucun
   cache et chaque affichage de page repart interroger l'API. C'est ce qui a
-  vidé le quota du mois en quelques heures le 2026-09-15.
+  vidé le quota du mois en quelques heures le 2026-09-15 ;
+- **une pause plus longue sur 429, persistée en base** : le compteur est
+  mensuel, pas horaire. Réessayer un quart d'heure plus tard ne peut rien
+  donner, et un redémarrage du service ne remet pas le compteur à zéro — la
+  pause doit donc survivre au redémarrage.
 """
 
 import json
@@ -51,10 +55,12 @@ ACCESS_TTL_S = 23 * 3600  # jeton d'accès ~24 h, rafraîchi avant expiration
 
 INTERVALLE_DEFAUT_MIN = 120   # rafraîchissement cloud par défaut
 INTERVALLE_PLANCHER_MIN = 30  # en dessous, le quota mensuel ne tient pas
-BACKOFF_ECHEC_MIN = 15        # pause après un appel en erreur
+BACKOFF_ECHEC_MIN = 15        # pause après un appel en erreur ordinaire
+BACKOFF_QUOTA_H = 12          # pause après un 429 : le quota est mensuel
 DELAI_MINIMAL_S = 60          # deux appels réels ne peuvent pas être plus rapprochés
 
 CACHE_JOUR = "cache_cloud_jour"
+PAUSE_QUOTA = "cloud_pause_quota"
 
 
 # ----------------------------------------------------------------------
@@ -202,6 +208,15 @@ class _NonAutorise(Exception):
     """Réponse 401 : le jeton d'accès présenté n'est plus accepté."""
 
 
+class _QuotaDepasse(Exception):
+    """Réponse 429 : le quota du plan Enphase est épuisé.
+
+    À distinguer d'une panne ordinaire : le plan Watt se compte au **mois**.
+    Réessayer un quart d'heure plus tard ne sert à rien, et chaque tentative
+    risque de compter dans le décompte du mois suivant.
+    """
+
+
 def _appel(url, params, token):
     r = requests.get(
         url, params=params,
@@ -210,6 +225,8 @@ def _appel(url, params, token):
     )
     if r.status_code == 401:
         raise _NonAutorise(_masquer(r.text)[:200])
+    if r.status_code == 429:
+        raise _QuotaDepasse(_masquer(r.text)[:200])
     if r.status_code >= 400:
         raise RuntimeError(
             f"{r.status_code} {r.reason} sur {_masquer(url)} : {_masquer(r.text)[:200]}"
@@ -349,6 +366,22 @@ def _lire_cache():
         return None, None
 
 
+def _pause_quota():
+    """Fin de la pause quota, relue en base — elle doit survivre au redémarrage.
+
+    La pause après panne ordinaire vit en mémoire : redémarrer le service est
+    une bonne occasion de retenter. Celle du quota, non — le compteur du plan
+    Watt se compte au mois, et un redémarrage ne le remet pas à zéro.
+    """
+    raw = get_setting(PAUSE_QUOTA, module=MODULE)
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except (ValueError, TypeError):
+        return None
+
+
 def _perime(ts, now):
     """Un cache d'hier ne vaut rien pour des données « du jour »."""
     return ts is None or ts.date() != now.date()
@@ -374,6 +407,17 @@ def _relever(force=False):
     if data is not None and not force and now - ts < timedelta(minutes=intervalle_minutes()):
         return data, ts, ""
 
+    # Le quota passe avant tout, y compris avant un forçage : cliquer sur
+    # « Actualiser » quand le compteur du mois est à zéro ne fait que creuser
+    # le trou du mois suivant.
+    quota = _pause_quota()
+    if quota and now < quota:
+        msg = ("Quota mensuel Enphase épuisé (plan Watt) — appels suspendus "
+               f"jusqu'à {quota.strftime('%d/%m à %H:%M')}.")
+        if data is not None:
+            return data, ts, msg
+        return None, None, msg
+
     dernier = _DERNIER_APPEL["a"]
     if dernier and (now - dernier).total_seconds() < DELAI_MINIMAL_S:
         if data is not None:
@@ -390,6 +434,20 @@ def _relever(force=False):
     _DERNIER_APPEL["a"] = now
     try:
         neuf = get_cloud_day()
+    except _QuotaDepasse as exc:
+        fin = now + timedelta(hours=BACKOFF_QUOTA_H)
+        set_setting(PAUSE_QUOTA, fin.isoformat(), module=MODULE)
+        _ECHEC.update({"jusqu_a": fin, "message": "quota mensuel épuisé"})
+        journal(
+            f"Quota mensuel Enphase épuisé (plan Watt) : {_masquer(str(exc))} "
+            f"— appels suspendus {BACKOFF_QUOTA_H} h. Le compteur se remet à "
+            "zéro au renouvellement du plan, pas à minuit.",
+            module=MODULE, level=LogEntry.ERROR,
+        )
+        msg = "Quota mensuel Enphase épuisé (plan Watt)."
+        if data is not None:
+            return data, ts, msg + " Dernière valeur connue."
+        return None, None, msg
     except Exception as exc:
         msg = _masquer(str(exc))
         _ECHEC.update({"jusqu_a": now + timedelta(minutes=BACKOFF_ECHEC_MIN), "message": msg})
@@ -403,6 +461,9 @@ def _relever(force=False):
 
     if _ECHEC["jusqu_a"]:
         journal("Cloud Enphase de nouveau joignable", module=MODULE)
+    if get_setting(PAUSE_QUOTA, module=MODULE):
+        set_setting(PAUSE_QUOTA, "", module=MODULE)
+        journal("Quota Enphase de nouveau disponible", module=MODULE)
     _ECHEC.update({"jusqu_a": None, "message": ""})
 
     set_setting(CACHE_JOUR, json.dumps({"ts": now.isoformat(), "data": neuf}), module=MODULE)
@@ -412,11 +473,14 @@ def _relever(force=False):
 def etat_cloud():
     """État du relevé cloud, pour l'affichage du paramétrage."""
     _data, ts = _lire_cache()
+    quota = _pause_quota()
     return {
         "dernier_releve": ts,
         "intervalle": intervalle_minutes(),
-        "suspendu_jusqu_a": _ECHEC["jusqu_a"],
-        "derniere_erreur": _ECHEC["message"],
+        "suspendu_jusqu_a": quota or _ECHEC["jusqu_a"],
+        "derniere_erreur": ("quota mensuel épuisé (plan Watt)" if quota
+                            else _ECHEC["message"]),
+        "quota_epuise": bool(quota),
     }
 
 
