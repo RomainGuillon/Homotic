@@ -119,13 +119,16 @@ def machines_restantes():
 
 
 def plan_machines():
-    """Plan du jour en clair : « 11:00 normal · 15:30 normal · 22:00 court (HC) »."""
+    """Machines restant à lancer : « 11:00 normal · 15:30 normal · 22:00 court (HC) ».
+
+    Comme à l'écran, une machine dont l'heure est passée n'y figure plus.
+    """
     plan = _plan_machines()
     if not plan:
         return None
     return " · ".join(
         f"{c['heure']} {c['type']}" + (" (HC)" if c.get("conseil") == "hc" else "")
-        for c in plan["cycles"] if c.get("heure")
+        for c in plan["affichees"] if c.get("heure")
     ) or None
 
 
@@ -144,7 +147,7 @@ INFOS = [
     {"nom": "prochaine_machine",
      "description": "Heure de lancement de la prochaine machine (HH:MM)"},
     {"nom": "machines_restantes", "description": "Machines restant à lancer aujourd'hui"},
-    {"nom": "plan_machines", "description": "Plan des machines du jour (texte)"},
+    {"nom": "plan_machines", "description": "Machines restant à lancer (texte)"},
 ]
 
 

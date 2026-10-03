@@ -555,7 +555,8 @@ def dernier_resultat():
 
     Source unique pour le tableau de bord, l'onglet et les infos. Ajoute à
     chaque cycle ``passe`` (son heure de lancement est derrière nous) et, au
-    plan, ``prochaine`` (le prochain cycle à lancer), ``restantes`` et les
+    plan, ``affichees`` (les cycles encore à lancer — les seuls qu'on
+    montre), ``prochaine`` (le premier d'entre eux), ``restantes`` et les
     totaux. ``perime`` signale un plan calculé un autre jour : ses heures ne
     veulent alors plus rien dire.
     """
@@ -590,8 +591,9 @@ def _completer(resultat):
     )
 
     a_venir = []
+    affichees = []
     total = {"kwh": 0.0, "solaire_kwh": 0.0, "import_kwh": 0.0, "cout": 0.0}
-    chiffrable = bool(resultat["cycles"])
+    chiffrable = True
     for numero, cycle in enumerate(resultat["cycles"], start=1):
         cycle["numero"] = numero
         de_nuit = cycle.get("conseil") != "jour"
@@ -599,36 +601,44 @@ def _completer(resultat):
         cycle["passe"] = bool(
             not de_nuit and cycle.get("debut") and cycle["debut"] < maintenant
         )
-        if not cycle["passe"] and cycle.get("heure"):
-            a_venir.append(cycle)
 
-        # Totaux sur l'option conseillée : de jour, la part solaire est
+        # Coût de l'option conseillée : de jour, la part solaire est
         # gratuite ; de nuit, tout le cycle est acheté en heures creuses.
-        total["kwh"] += cycle["kwh"]
-        if de_nuit:
-            total["import_kwh"] += cycle["kwh"]
-            cout = cycle.get("cout_hc")
-        else:
-            total["solaire_kwh"] += cycle.get("solaire_kwh") or 0.0
-            total["import_kwh"] += cycle.get("import_kwh") or 0.0
-            cout = cycle.get("cout_jour")
-        if cout is None:
-            chiffrable = False
-        else:
-            total["cout"] += cout
-
         # Un cycle coûte quelques centimes : c'est l'unité lisible.
+        cout = cycle.get("cout_hc") if de_nuit else cycle.get("cout_jour")
         cycle["cout_c"] = _centimes(cout)
         cycle["cout_jour_c"] = _centimes(cycle.get("cout_jour"))
         cycle["cout_hc_c"] = _centimes(cycle.get("cout_hc"))
         cycle["ecart_c"] = _centimes(cycle.get("ecart"))
 
-    if not chiffrable:
+        # Une machine dont l'heure est passée est supposée lancée : elle
+        # reste dans le plan (le calcul en a besoin) mais n'est plus
+        # montrée, et ne compte plus dans les totaux.
+        if cycle["passe"]:
+            continue
+        affichees.append(cycle)
+        if cycle.get("heure"):
+            a_venir.append(cycle)
+
+        total["kwh"] += cycle["kwh"]
+        if de_nuit:
+            total["import_kwh"] += cycle["kwh"]
+        else:
+            total["solaire_kwh"] += cycle.get("solaire_kwh") or 0.0
+            total["import_kwh"] += cycle.get("import_kwh") or 0.0
+        if cout is None:
+            chiffrable = False
+        else:
+            total["cout"] += cout
+
+    if not chiffrable or not affichees:
         total["cout"] = None
     total["cout_c"] = _centimes(total["cout"])
     resultat["total"] = total
+    resultat["affichees"] = affichees
     resultat["restantes"] = len(a_venir)
-    resultat["a_des_passees"] = any(c["passe"] for c in resultat["cycles"])
+    resultat["nb_passees"] = len(resultat["cycles"]) - len(affichees)
+    resultat["a_des_passees"] = resultat["nb_passees"] > 0
     # Les cycles de jour d'abord, dans l'ordre ; ceux de la nuit ensuite.
     a_venir.sort(key=lambda c: (c.get("conseil") != "jour", c.get("debut") or maintenant))
     resultat["prochaine"] = (

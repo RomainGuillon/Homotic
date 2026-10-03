@@ -149,8 +149,8 @@
       <button class="btn btn-primary">Calculer</button>
       <button class="btn btn-outline-secondary" name="tout" value="1">Tout replanifier</button>
     </form>
-    <p class="form-text mt-0 mb-3">Un nouveau calcul garde les machines dont l'heure est déjà
-      passée — elles sont supposées lancées — et ne replace que les autres.
+    <p class="form-text mt-0 mb-3">Une machine dont l'heure est passée est supposée lancée :
+      elle disparaît du plan, et un nouveau calcul ne replace que les autres.
       « Tout replanifier » repart de zéro.</p>
 
     {% if p.jamais_calcule %}
@@ -177,8 +177,8 @@
             <th class="ps-4">Conseil</th>
           </tr></thead>
           <tbody>
-            {% for c in p.cycles %}
-              <tr {% if c.passe %}class="text-secondary"{% endif %}>
+            {% for c in p.affichees %}
+              <tr>
                 <td>{{ c.libelle }}<br>
                   <span class="small text-secondary">{{ c.duree_min }} min · {{ c.kwh|floatformat:2 }} kWh</span></td>
                 <td>{% if c.debut %}{{ c.debut|date:"H:i" }} — {{ c.fin|date:"H:i" }}
@@ -189,9 +189,7 @@
                 <td class="text-end">{% if c.cout_jour_c is not None %}{{ c.cout_jour_c|floatformat:1 }} cts{% else %}—{% endif %}</td>
                 <td class="text-end">{% if c.cout_hc_c is not None %}{{ c.cout_hc_c|floatformat:1 }} cts{% else %}—{% endif %}</td>
                 <td class="ps-4">
-                  {% if c.passe %}
-                    supposée lancée à {{ c.heure }}
-                  {% elif c.conseil == "jour" %}
+                  {% if c.conseil == "jour" %}
                     <strong style="color:#f59e0b">lancer à {{ c.heure }}</strong>
                   {% elif c.conseil == "hc" %}
                     <strong style="color:#93c5fd">heures creuses, dès {{ c.heure }}</strong>
@@ -201,16 +199,23 @@
                   {% endif %}
                 </td>
               </tr>
+            {% empty %}
+              <tr><td colspan="7" class="text-secondary">Plus de machine à lancer aujourd'hui.</td></tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
 
       <p class="small text-secondary mb-0">
-        Total conseillé : {{ p.total.kwh|floatformat:2 }} kWh, dont
-        <span class="text-success">{{ p.total.solaire_kwh|floatformat:2 }} kWh solaires</span>
-        et {{ p.total.import_kwh|floatformat:2 }} kWh achetés{% if p.total.cout_c is not None %}
-        — <strong>{{ p.total.cout_c|floatformat:1 }} cts</strong>{% endif %}.
+        {% if p.affichees %}
+          Reste à lancer : {{ p.total.kwh|floatformat:2 }} kWh, dont
+          <span class="text-success">{{ p.total.solaire_kwh|floatformat:2 }} kWh solaires</span>
+          et {{ p.total.import_kwh|floatformat:2 }} kWh achetés{% if p.total.cout_c is not None %}
+          — <strong>{{ p.total.cout_c|floatformat:1 }} cts</strong>{% endif %}.
+        {% endif %}
+        {% if p.nb_passees %}
+          Machines dont l'heure est passée, supposées lancées et masquées : {{ p.nb_passees }}.
+        {% endif %}
         {% if p.quand %}Calculé à {{ p.quand|date:"H:i" }}.{% endif %}</p>
 
       {% if p.detail %}

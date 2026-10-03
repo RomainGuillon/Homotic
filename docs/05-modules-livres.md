@@ -236,15 +236,17 @@ prise connectée ; les mesurer sur sa propre machine prend une semaine.
 nuit coûte moins cher que le meilleur créneau du jour — journée sans soleil,
 et presque toujours en jour rouge — le module le dit et donne l'écart.
 
-**Recalculer en cours de journée ne repropose pas une machine déjà faite.**
-Un cycle dont l'heure est passée est supposé lancé : il est conservé, et
-seuls les autres sont replacés. Si le plan n'a pas été suivi, le bouton
+**Une machine dont l'heure est passée disparaît de l'affichage.** Elle est
+supposée lancée : sa ligne n'est plus montrée, ni sur le tableau de bord ni
+dans l'onglet, et un recalcul en cours de journée ne la repropose pas —
+seules les autres sont replacées. Si le plan n'a pas été suivi, le bouton
 « Tout replanifier » repart de zéro. Recalculer le chauffe-eau refait aussi
 le plan des machines, puisqu'elles se placent autour de lui.
 
 Action de scénario : `recalculer_machines`, avec le nombre de cycles en
 paramètres facultatifs (vides = inchangés). Infos : `prochaine_machine`
-(heure du prochain lancement), `machines_restantes`, `plan_machines`.
+(heure du prochain lancement), `machines_restantes`, `plan_machines` (ce
+qui reste à lancer, en clair).
 
 ## Tempo
 

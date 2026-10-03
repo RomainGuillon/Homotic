@@ -367,6 +367,49 @@ class CalculDesMachines(TestCase):
         self.assertEqual(midi["restantes"], 1)
         self.assertEqual(midi["prochaine"]["heure"], "09:40")
 
+    def test_une_machine_dont_l_heure_est_passee_n_est_plus_affichee(self):
+        """Sans aucun recalcul : c'est l'heure qu'il est qui retire la ligne."""
+        api.set_machines_demandees(normal=2)
+        with Horloge(7), _besoins(_soleil(), _tarifs_tempo()):
+            machines.calculer()
+            plan = machines.dernier_resultat()
+            self.assertEqual([c["heure"] for c in plan["affichees"]], ["08:00", "09:40"])
+            self.assertEqual(plan["nb_passees"], 0)
+            self.assertAlmostEqual(plan["total"]["kwh"], 0.60)
+
+        with Horloge(8):  # pile à l'heure : la machine reste à lancer
+            plan = machines.dernier_resultat()
+            self.assertEqual([c["heure"] for c in plan["affichees"]], ["08:00", "09:40"])
+
+        with Horloge(8, 30):
+            plan = machines.dernier_resultat()
+            self.assertEqual([c["heure"] for c in plan["affichees"]], ["09:40"])
+            self.assertEqual(plan["nb_passees"], 1)
+            # Le plan complet est gardé : le calcul en a besoin
+            self.assertEqual(len(plan["cycles"]), 2)
+            # Les totaux ne comptent plus que ce qui reste à lancer
+            self.assertAlmostEqual(plan["total"]["kwh"], 0.30)
+            self.assertEqual(info.plan_machines(), "09:40 normal")
+
+        with Horloge(11):
+            plan = machines.dernier_resultat()
+            self.assertEqual(plan["affichees"], [])
+            self.assertEqual(plan["nb_passees"], 2)
+            self.assertEqual(plan["restantes"], 0)
+            self.assertIsNone(plan["prochaine"])
+            self.assertIsNone(plan["total"]["cout"])
+            self.assertIsNone(info.plan_machines())
+
+    def test_une_machine_conseillee_en_heures_creuses_reste_affichee(self):
+        """Son créneau de jour a beau être passé, elle reste à lancer ce soir."""
+        with Horloge(7), _besoins(None, _tarifs_tempo("RED")):
+            machines.calculer()
+        with Horloge(15):
+            plan = machines.dernier_resultat()
+        cycle, = plan["affichees"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("hc", "22:00"))
+        self.assertEqual(plan["nb_passees"], 0)
+
     def test_tout_replanifier_oublie_les_machines_passees(self):
         api.set_machines_demandees(normal=2)
         with _besoins(_soleil(), _tarifs_tempo()):
@@ -570,6 +613,44 @@ class PagesDuModule(TestCase):
         self.assertContains(page, "Cycles normaux")
         self.assertContains(page, "08:00")
         self.assertContains(page, "Cycle normal")
+        self.assertFalse(LogEntry.objects.filter(level=LogEntry.ERROR).exists())
+
+    def _bloc_machines(self):
+        """HTML du seul bloc « Machines » du tableau de bord."""
+        page = self.client.get("/")
+        return next(
+            b["html"] for b in page.context["blocs"] if b["key"] == "heure_demarrage.1"
+        )
+
+    def test_la_ligne_disparait_quand_l_heure_est_passee(self):
+        self._poster(action="machines", machines_normal="2", machines_court="0")
+        lancer = '<strong style="color:#f59e0b">lancer à {}</strong>'
+
+        with Horloge(7):
+            bloc = self._bloc_machines()
+        self.assertIn("08:00", bloc)
+        self.assertIn("09:40", bloc)
+        self.assertNotIn("Tout replanifier", bloc)
+
+        # 08:30 : la machine de 08:00 n'est plus montrée, celle de 09:40 si
+        with Horloge(8, 30):
+            bloc = self._bloc_machines()
+            onglet = self.client.get(self.URL)
+        self.assertNotIn("08:00", bloc)
+        self.assertIn("09:40", bloc)
+        self.assertIn("Tout replanifier", bloc)
+        self.assertNotContains(onglet, lancer.format("08:00"))
+        self.assertContains(onglet, lancer.format("09:40"))
+        self.assertContains(onglet, "supposées lancées et masquées : 1")
+
+        # 11:00 : plus rien à lancer
+        with Horloge(11):
+            bloc = self._bloc_machines()
+            onglet = self.client.get(self.URL)
+        self.assertNotIn("09:40", bloc)
+        self.assertIn("Plus de machine à lancer", bloc)
+        self.assertContains(onglet, "Plus de machine à lancer")
+        self.assertContains(onglet, "supposées lancées et masquées : 2")
         self.assertFalse(LogEntry.objects.filter(level=LogEntry.ERROR).exists())
 
     def test_le_bloc_du_chauffe_eau_garde_sa_cle(self):
