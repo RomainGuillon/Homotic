@@ -5,17 +5,19 @@
 # conserver la présente mention de copyright.
 # Voir le fichier LICENSE à la racine du dépôt.
 
-"""Manifest du module Heure de démarrage (chauffe-eau).
+"""Manifest du module Heure de démarrage (chauffe-eau et machines).
 
-Module de calcul : un onglet de configuration, un bloc sur le tableau de bord
-(heure calculée) et des fonctions utilisables dans les scénarios.
+Module de calcul : un onglet de configuration, deux blocs sur le tableau de
+bord (heure du chauffe-eau, heures des machines) et des fonctions
+utilisables dans les scénarios.
 """
 
 ONGLET = "Heure démarrage"
 ICONE = "clock-history"
 DESCRIPTION = (
     "Calcule la meilleure heure de démarrage du chauffe-eau (créneau le plus "
-    "productif, ou arbitrage coût jour/nuit si « optimiser » est coché)."
+    "productif, ou arbitrage coût jour/nuit si « optimiser » est coché), puis "
+    "les heures de lancement des machines sur le surplus solaire restant."
 )
 
 # Pas de recalcul automatique : c'est un choix. Le calcul dépend des
@@ -40,18 +42,21 @@ BESOINS = [
         "type": "serie",
         "unite": "kW",
         "obligatoire": True,
-        "sans": "aucun créneau solaire : repli systématique sur les heures creuses",
+        "sans": "aucun créneau solaire : repli systématique sur les heures creuses, "
+                "pour le chauffe-eau comme pour les machines",
     },
     {
         "nom": "tarifs_jour",
         "libelle": "Tarification électrique du jour",
         "type": "objet",
         "obligatoire": False,
-        "sans": "pas d'arbitrage coût jour/nuit, le créneau solaire est retenu tel quel",
+        "sans": "pas d'arbitrage coût jour/nuit, le créneau solaire est retenu tel quel "
+                "(et les machines ne sont pas comparées aux heures creuses)",
     },
 ]
 
-# Actions exposées aux scénarios : relancer le calcul à la demande.
+# Actions exposées aux scénarios : relancer le calcul à la demande (du
+# chauffe-eau, ou des seules machines).
 try:
     from modules.heure_demarrage.fonctions.scenario import build_scenario_entries
 

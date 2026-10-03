@@ -17,7 +17,7 @@ Pour rafraîchir ces valeurs : action de scénario « recalculer » (ou le bouto
 Recalculer de l'onglet).
 """
 
-from . import api, calcul
+from . import api, calcul, machines
 
 
 def heure_demarrage():
@@ -94,6 +94,41 @@ def creneau_retenu():
     }
 
 
+def _plan_machines():
+    """Plan des machines du jour, ou ``None`` s'il n'y en a pas d'utilisable.
+
+    Un plan calculé la veille ne dit rien d'aujourd'hui : mieux vaut une
+    info vide qu'une heure qui déclencherait un scénario à tort.
+    """
+    plan = machines.dernier_resultat()
+    if plan["jamais_calcule"] or plan["perime"]:
+        return None
+    return plan
+
+
+def prochaine_machine():
+    """Heure de lancement de la prochaine machine (HH:MM), sinon None."""
+    plan = _plan_machines()
+    return plan["prochaine"]["heure"] if plan and plan["prochaine"] else None
+
+
+def machines_restantes():
+    """Nombre de machines du plan du jour qui restent à lancer."""
+    plan = _plan_machines()
+    return plan["restantes"] if plan else 0
+
+
+def plan_machines():
+    """Plan du jour en clair : « 11:00 normal · 15:30 normal · 22:00 court (HC) »."""
+    plan = _plan_machines()
+    if not plan:
+        return None
+    return " · ".join(
+        f"{c['heure']} {c['type']}" + (" (HC)" if c.get("conseil") == "hc" else "")
+        for c in plan["cycles"] if c.get("heure")
+    ) or None
+
+
 INFOS = [
     {"nom": "creneau_retenu", "type": "objet",
      "description": "Créneau de chauffe retenu (heure, durée, mode)"},
@@ -106,6 +141,10 @@ INFOS = [
     {"nom": "calcul_du_jour",
      "description": "Le dernier calcul date-t-il d'aujourd'hui ? (oui/non)"},
     {"nom": "heure_calcul", "description": "Heure du dernier calcul (HH:MM)"},
+    {"nom": "prochaine_machine",
+     "description": "Heure de lancement de la prochaine machine (HH:MM)"},
+    {"nom": "machines_restantes", "description": "Machines restant à lancer aujourd'hui"},
+    {"nom": "plan_machines", "description": "Plan des machines du jour (texte)"},
 ]
 
 

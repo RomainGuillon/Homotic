@@ -17,7 +17,7 @@ Django à part entière (templates, modèles, migrations).
 | `tuya` | Capteurs | Capteurs et prises Tuya, lus sur le réseau local |
 | `arlo` | Caméras | Modes de surveillance Arlo et instantanés |
 | `verisure` | Alarme | État de l'alarme Verisure (lecture seule) |
-| `heure_demarrage` | Heure démarrage | Calcule la meilleure heure de chauffe du ballon |
+| `heure_demarrage` | Heure démarrage | Calcule la meilleure heure de chauffe du ballon, puis des machines |
 | `exemple` | Exemple | Squelette à copier pour démarrer un module |
 
 ## Structure d'un module
@@ -32,7 +32,7 @@ mon_module/
 ```
 
 Seul `conf.py` est obligatoire. Un module peut n'avoir aucun bloc de tableau
-de bord (`heure_demarrage`), ou aucune action de scénario (`verisure`).
+de bord (`exemple`), ou aucune action de scénario (`verisure`).
 
 Le manifest déclare :
 

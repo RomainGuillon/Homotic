@@ -26,11 +26,11 @@
     </div>
   </form>
 </div>
-<p class="text-secondary small mb-4">Meilleur moment pour démarrer le chauffe-eau</p>
+<p class="text-secondary small mb-4">Meilleur moment pour démarrer le chauffe-eau, puis les machines</p>
 
 {# ---------- Résultat ---------- #}
 <div class="card mb-4">
-  <div class="card-header"><i class="bi bi-clock-history me-2"></i>Résultat du calcul</div>
+  <div class="card-header"><i class="bi bi-clock-history me-2"></i>Chauffe-eau — résultat du calcul</div>
   <div class="card-body">
     <div class="row text-center mb-3">
       <div class="col-12 col-md-4">
@@ -121,6 +121,170 @@
           à chaque recalcul automatique ou via le bouton Recalculer.</p>
       </details>
     {% endif %}
+  </div>
+</div>
+
+{# ---------- Machines ---------- #}
+<div class="card mb-4" id="machines">
+  <div class="card-header"><i class="bi bi-basket me-2"></i>Machines — heures de lancement</div>
+  <div class="card-body">
+    <p class="text-secondary small mb-3">Indiquer le nombre de cycles à faire aujourd'hui.
+      Le chauffe-eau reste prioritaire : son créneau n'est pas modifié, les machines se
+      placent sur le surplus solaire qui reste. Chaque créneau est comparé aux heures
+      creuses.</p>
+
+    <form method="post" class="d-flex flex-wrap align-items-end gap-3 mb-3">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="machines">
+      <div>
+        <label class="form-label" for="machinesNormal">Cycles normaux</label>
+        <input type="number" class="form-control" style="width:8rem" id="machinesNormal"
+               name="machines_normal" min="0" max="{{ max_machines }}" value="{{ demandes.normal }}">
+      </div>
+      <div>
+        <label class="form-label" for="machinesCourt">Cycles courts</label>
+        <input type="number" class="form-control" style="width:8rem" id="machinesCourt"
+               name="machines_court" min="0" max="{{ max_machines }}" value="{{ demandes.court }}">
+      </div>
+      <button class="btn btn-primary">Calculer</button>
+      <button class="btn btn-outline-secondary" name="tout" value="1">Tout replanifier</button>
+    </form>
+    <p class="form-text mt-0 mb-3">Un nouveau calcul garde les machines dont l'heure est déjà
+      passée — elles sont supposées lancées — et ne replace que les autres.
+      « Tout replanifier » repart de zéro.</p>
+
+    {% if p.jamais_calcule %}
+      <p class="small text-warning mb-0">Aucun plan calculé.</p>
+    {% elif not p.cycles %}
+      <p class="small text-secondary mb-0">Aucune machine prévue aujourd'hui.</p>
+    {% else %}
+      {% if p.perime %}
+        <div class="alert alert-warning py-2 small mb-3">
+          <i class="bi bi-exclamation-triangle me-1"></i>Plan calculé un autre jour : ses
+          heures ne valent plus rien, relancer « Calculer ».</div>
+      {% endif %}
+      {% if p.erreur %}
+        <div class="alert alert-warning py-2 small mb-3">
+          <i class="bi bi-exclamation-triangle me-1"></i>{{ p.erreur }}</div>
+      {% endif %}
+
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-2">
+          <thead><tr>
+            <th>Cycle</th><th>Créneau de jour</th>
+            <th class="text-end">Solaire</th><th class="text-end">Réseau</th>
+            <th class="text-end">Coût de jour</th><th class="text-end">Heures creuses</th>
+            <th class="ps-4">Conseil</th>
+          </tr></thead>
+          <tbody>
+            {% for c in p.cycles %}
+              <tr {% if c.passe %}class="text-secondary"{% endif %}>
+                <td>{{ c.libelle }}<br>
+                  <span class="small text-secondary">{{ c.duree_min }} min · {{ c.kwh|floatformat:2 }} kWh</span></td>
+                <td>{% if c.debut %}{{ c.debut|date:"H:i" }} — {{ c.fin|date:"H:i" }}
+                    {% if c.avec_ballon %}<br><span class="small text-secondary">avec le chauffe-eau</span>{% endif %}
+                  {% else %}<span class="text-secondary">plus de créneau</span>{% endif %}</td>
+                <td class="text-end">{% if c.solaire_kwh is not None %}<span class="text-success">{{ c.solaire_kwh|floatformat:2 }} kWh</span>{% else %}—{% endif %}</td>
+                <td class="text-end">{% if c.import_kwh is not None %}{{ c.import_kwh|floatformat:2 }} kWh{% else %}—{% endif %}</td>
+                <td class="text-end">{% if c.cout_jour_c is not None %}{{ c.cout_jour_c|floatformat:1 }} cts{% else %}—{% endif %}</td>
+                <td class="text-end">{% if c.cout_hc_c is not None %}{{ c.cout_hc_c|floatformat:1 }} cts{% else %}—{% endif %}</td>
+                <td class="ps-4">
+                  {% if c.passe %}
+                    supposée lancée à {{ c.heure }}
+                  {% elif c.conseil == "jour" %}
+                    <strong style="color:#f59e0b">lancer à {{ c.heure }}</strong>
+                  {% elif c.conseil == "hc" %}
+                    <strong style="color:#93c5fd">heures creuses, dès {{ c.heure }}</strong>
+                    {% if c.ecart_c is not None %}<br><span class="small text-secondary">{{ c.ecart_c|floatformat:1 }} cts de moins</span>{% endif %}
+                  {% else %}
+                    <span class="text-secondary">à reporter</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <p class="small text-secondary mb-0">
+        Total conseillé : {{ p.total.kwh|floatformat:2 }} kWh, dont
+        <span class="text-success">{{ p.total.solaire_kwh|floatformat:2 }} kWh solaires</span>
+        et {{ p.total.import_kwh|floatformat:2 }} kWh achetés{% if p.total.cout_c is not None %}
+        — <strong>{{ p.total.cout_c|floatformat:1 }} cts</strong>{% endif %}.
+        {% if p.quand %}Calculé à {{ p.quand|date:"H:i" }}.{% endif %}</p>
+
+      {% if p.detail %}
+        <details class="mt-3">
+          <summary class="text-secondary small" style="cursor:pointer">Détail du calcul</summary>
+          <ul class="small text-secondary mt-2 mb-0">
+            {% for ligne in p.detail %}<li>{{ ligne }}</li>{% endfor %}
+          </ul>
+        </details>
+      {% endif %}
+    {% endif %}
+  </div>
+</div>
+
+{# ---------- Profil des machines ---------- #}
+<div class="card mb-4">
+  <div class="card-header"><i class="bi bi-sliders me-2"></i>Profil des machines</div>
+  <div class="card-body">
+    <p class="text-secondary small mb-3">Ce que consomme un cycle, relevé sur une prise
+      connectée. La <strong>chauffe</strong> de l'eau, en début de cycle, tire la
+      résistance à pleine puissance par salves : le solaire ne la couvre que s'il
+      dépasse cette puissance. Le reste du cycle consomme peu.</p>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="machines_params">
+      {% for pr in profils %}
+        <div class="row g-3 mb-3">
+          <div class="col-12 col-md-2 d-flex align-items-center"><strong>{{ pr.libelle }}</strong></div>
+          <div class="col-6 col-md-2">
+            <label class="form-label">Durée</label>
+            <input type="number" name="machine_{{ pr.type }}_duree" class="form-control" min="1" value="{{ pr.duree_min }}">
+            <div class="form-text">minutes</div>
+          </div>
+          <div class="col-6 col-md-2">
+            <label class="form-label">Consommation</label>
+            <input type="text" name="machine_{{ pr.type }}_kwh" class="form-control" value="{{ pr.kwh|stringformat:'.2f' }}">
+            <div class="form-text">kWh par cycle</div>
+          </div>
+          <div class="col-6 col-md-2">
+            <label class="form-label">Durée de chauffe</label>
+            <input type="number" name="machine_{{ pr.type }}_chauffe_min" class="form-control" min="0" value="{{ pr.chauffe_min }}">
+            <div class="form-text">minutes, en début de cycle</div>
+          </div>
+          <div class="col-6 col-md-2">
+            <label class="form-label">dont chauffe</label>
+            <input type="text" name="machine_{{ pr.type }}_chauffe_kwh" class="form-control" value="{{ pr.chauffe_kwh|stringformat:'.2f' }}">
+            <div class="form-text">kWh pendant la chauffe</div>
+          </div>
+        </div>
+      {% endfor %}
+      <div class="row g-3 mb-3">
+        <div class="col-6 col-md-2 offset-md-2">
+          <label class="form-label">Résistance</label>
+          <input type="text" name="machine_pointe_kw" class="form-control" value="{{ machine.pointe_kw }}">
+          <div class="form-text">kW tirés pendant la chauffe</div>
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label">Lancement dès</label>
+          <input type="time" name="machine_plage_debut" class="form-control" value="{{ machine.plage_debut }}">
+          <div class="form-text">première heure possible</div>
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label">jusqu'à</label>
+          <input type="time" name="machine_plage_fin" class="form-control" value="{{ machine.plage_fin }}">
+          <div class="form-text">dernier lancement</div>
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label">Pause</label>
+          <input type="number" name="machine_pause_min" class="form-control" min="0" value="{{ machine.pause_min }}">
+          <div class="form-text">minutes entre deux cycles</div>
+        </div>
+      </div>
+      <button class="btn btn-primary">Enregistrer</button>
+    </form>
   </div>
 </div>
 

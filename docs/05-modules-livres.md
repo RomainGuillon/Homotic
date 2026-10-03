@@ -14,7 +14,7 @@ Chaque module se paramètre dans son propre onglet, section « Paramétrage ».
 | `tuya` | Capteurs | Capteurs et prises Tuya, lus sur le réseau local |
 | `arlo` | Caméras | Mode de surveillance des caméras Arlo et instantanés |
 | `verisure` | Alarme | État de l'alarme Verisure, en lecture seule |
-| `heure_demarrage` | Heure démarrage | Calcule la meilleure heure de chauffe du ballon |
+| `heure_demarrage` | Heure démarrage | Calcule la meilleure heure de chauffe du ballon, puis les heures de lancement des machines |
 
 ## Énergie (Enphase)
 
@@ -114,9 +114,11 @@ fond : si personne n'ouvre le tableau de bord, aucun appel n'est consommé.
 > mois a été épuisé en quelques heures.
 
 Un `429 Usage limit exceeded for plan Watt` au Journal ne se corrige pas : le
-quota est consommé, il n'y a qu'à attendre le renouvellement du plan — qui
-tombe à la date d'anniversaire de l'abonnement développeur, pas au 1er du
-mois. Le bloc « La journée » retombe entre-temps sur les cumuls locaux de
+quota est consommé, il n'y a qu'à attendre le renouvellement du plan. Le
+compteur est **mensuel calendaire** : il repart de zéro le 1er du mois, sur
+l'horloge du portail Enphase (Pacific Time, soit le 1er vers 9 h en France).
+Vérifiable dans *View application statistics* du portail développeur, vue
+« 12 months » : la courbe retombe à zéro à chaque changement de mois. Le bloc « La journée » retombe entre-temps sur les cumuls locaux de
 l'Envoy, et le coût perd son détail par tranche. Tout le reste du module, qui
 est local, continue normalement.
 
@@ -208,6 +210,41 @@ chauffe courte. Aucun basculement automatique par la date.
 Infos utiles en condition : `heure_demarrage`, `mode_retenu`,
 `calcul_du_jour` (le calcul date-t-il d'aujourd'hui ?), `heure_calcul`,
 `gain_estime_eur`, `surplus_creneau_kwh`.
+
+### Les machines
+
+Le module propose aussi une heure de lancement pour les machines qu'on
+démarre à la main — un lave-linge non connecté, typiquement. On indique
+combien de cycles on veut faire dans la journée, **normaux** ou **courts**,
+dans le bloc « Machines » du tableau de bord ou dans l'onglet ; le module
+répond par une heure pour chacun.
+
+**Le chauffe-eau reste prioritaire.** Son créneau n'est jamais recalculé par
+les machines : elles lisent le dernier calcul mémorisé et se placent sur le
+surplus solaire qui reste une fois le ballon servi. Une machine ne tourne en
+même temps que lui que si le solaire couvre les deux.
+
+**Un cycle se décrit en deux phases** (carte « Profil des machines ») : la
+*chauffe* de l'eau, en début de cycle, où la résistance tire sa pleine
+puissance par salves, puis le *reste*, faible et continu. La distinction
+compte : un surplus de 1 kW couvre la moyenne d'un cycle sans peine, mais
+seulement la moitié d'une salve à 2 kW — c'est cette fraction qui est
+comptée, pas la moyenne. Les valeurs par défaut viennent d'un relevé sur une
+prise connectée ; les mesurer sur sa propre machine prend une semaine.
+
+**Chaque créneau est comparé aux heures creuses.** Si lancer la machine la
+nuit coûte moins cher que le meilleur créneau du jour — journée sans soleil,
+et presque toujours en jour rouge — le module le dit et donne l'écart.
+
+**Recalculer en cours de journée ne repropose pas une machine déjà faite.**
+Un cycle dont l'heure est passée est supposé lancé : il est conservé, et
+seuls les autres sont replacés. Si le plan n'a pas été suivi, le bouton
+« Tout replanifier » repart de zéro. Recalculer le chauffe-eau refait aussi
+le plan des machines, puisqu'elles se placent autour de lui.
+
+Action de scénario : `recalculer_machines`, avec le nombre de cycles en
+paramètres facultatifs (vides = inchangés). Infos : `prochaine_machine`
+(heure du prochain lancement), `machines_restantes`, `plan_machines`.
 
 ## Tempo
 

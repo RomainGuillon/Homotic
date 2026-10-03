@@ -5,7 +5,8 @@
 # conserver la présente mention de copyright.
 # Voir le fichier LICENSE à la racine du dépôt.
 
-"""Onglet Heure de démarrage : réglages + résultat du calcul."""
+"""Onglet Heure de démarrage : réglages + résultat des calculs (chauffe-eau
+et machines)."""
 
 from django.contrib import messages
 from django.shortcuts import redirect, render
@@ -13,7 +14,7 @@ from django.shortcuts import redirect, render
 from core.models import Control
 from core.services import journal, set_setting
 
-from ..fonctions import api, calcul
+from ..fonctions import api, calcul, machines
 
 
 def _creer_switchs_saison():
@@ -65,6 +66,75 @@ def _save_params(request):
     )
 
 
+def _save_machines_params(request):
+    """Enregistre le profil des machines, puis refait le plan en cours.
+
+    Une valeur illisible est ignorée : le réglage garde sa valeur, comme
+    pour les réglages du chauffe-eau.
+    """
+    for key, _defaut, kind in api.REGLAGES_MACHINES:
+        raw = request.POST.get(key, "").strip()
+        if kind in ("int", "int0"):
+            try:
+                minimum = 1 if kind == "int" else 0
+                valeur = max(minimum, int(float(raw.replace(",", "."))))
+            except ValueError:
+                continue
+            set_setting(key, str(valeur), module=api.MODULE)
+        elif kind == "float":
+            try:
+                valeur = max(0.0, float(raw.replace(",", ".")))
+            except ValueError:
+                continue
+            set_setting(key, f"{valeur:.2f}", module=api.MODULE)
+        elif kind == "heure":
+            parts = raw.split(":")
+            if len(parts) == 2 and all(p.isdigit() for p in parts):
+                set_setting(
+                    key, f"{int(parts[0]) % 24:02d}:{int(parts[1]) % 60:02d}",
+                    module=api.MODULE,
+                )
+
+    journal("Profil des machines mis à jour", module=api.MODULE)
+    debut, fin = api.plage_machines()
+    if debut > fin:
+        messages.warning(
+            request,
+            f"Plage de lancement vide : elle commence à {debut} et finit à {fin}. "
+            "Aucune machine ne pourra être placée en journée.",
+        )
+    else:
+        messages.success(request, "Profil des machines enregistré.")
+    # Le plan affiché a été calculé avec l'ancien profil.
+    machines.recalculer_si_demande()
+
+
+def _planifier_machines(request):
+    """Enregistre le nombre de cycles voulus et calcule leurs heures."""
+    api.set_machines_demandees(
+        normal=request.POST.get("machines_normal"),
+        court=request.POST.get("machines_court"),
+    )
+    plan = machines.calculer(
+        tracer=True, tout_replanifier=bool(request.POST.get("tout"))
+    )
+    if not plan["cycles"]:
+        messages.info(request, "Aucune machine demandée : le plan est vide.")
+    elif plan["prochaine"]:
+        c = plan["prochaine"]
+        quand = (
+            f"en heures creuses, à partir de {c['heure']}"
+            if c["conseil"] == "hc" else f"à {c['heure']}"
+        )
+        messages.success(
+            request, f"Machines planifiées : prochain lancement {quand}."
+        )
+    else:
+        messages.warning(
+            request, "Machines planifiées, mais aucun lancement à venir aujourd'hui."
+        )
+
+
 def onglet(request):
     crees = _creer_switchs_saison()
 
@@ -92,8 +162,15 @@ def onglet(request):
                         f"{resultat.get('erreur') or 'plus de prévision pour la journée'}. "
                         f"L'heure précédente est conservée.",
                     )
+            elif action == "machines":
+                _planifier_machines(request)
+            elif action == "machines_params":
+                _save_machines_params(request)
         except Exception as exc:
             messages.error(request, f"Échec : {exc}")
+        # Le bloc « Machines » du tableau de bord poste ici : on y retourne.
+        if request.POST.get("retour") == "dashboard":
+            return redirect("core:dashboard")
         return redirect("core:module_tab", name="heure_demarrage")
 
     if crees:
@@ -129,5 +206,16 @@ def onglet(request):
             "switchs_saison": Control.objects.filter(
                 type=Control.SWITCH, group="saison"
             ),
+            # --- Machines ---
+            "p": machines.dernier_resultat(),
+            "demandes": api.machines_demandees(),
+            "max_machines": api.MAX_MACHINES,
+            "profils": [api.profil_machine(t) for t, _libelle in api.TYPES_MACHINE],
+            "machine": {
+                "pointe_kw": f"{api.pointe_machine_kw():.2f}",
+                "plage_debut": api.plage_machines()[0],
+                "plage_fin": api.plage_machines()[1],
+                "pause_min": api.pause_machines_min(),
+            },
         },
     )

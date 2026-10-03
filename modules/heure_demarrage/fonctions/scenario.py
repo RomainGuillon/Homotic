@@ -8,10 +8,11 @@
 """Fonctions d'ACTION du module Heure de démarrage (contrat SCENARIO).
 
 Permettent de relancer le calcul depuis un scénario, par exemple juste
-avant de tester l'heure ou en début de journée.
+avant de tester l'heure ou en début de journée — pour le chauffe-eau comme
+pour les machines.
 """
 
-from . import api, calcul
+from . import api, calcul, machines
 
 
 def recalculer(arbitrage="nuit"):
@@ -36,6 +37,19 @@ def publier_variables():
     return "ok"
 
 
+def recalculer_machines(normales="", courtes=""):
+    """Refait le plan des machines et retourne l'heure de la prochaine.
+
+    ``normales`` / ``courtes`` : nombre de cycles voulus dans la journée.
+    Laissés vides, les nombres en place sont conservés — l'action sert alors
+    à rafraîchir le plan, par exemple après une mise à jour des prévisions.
+    Le créneau du chauffe-eau n'est jamais modifié par cette action.
+    """
+    api.set_machines_demandees(normal=normales, court=courtes)
+    plan = machines.calculer(tracer=True)
+    return plan["prochaine"]["heure"] if plan["prochaine"] else None
+
+
 SCENARIO = [
     {"nom": "recalculer", "fonction": "fonctions.scenario.recalculer",
      "description": "Recalcule l'heure de démarrage et met à jour "
@@ -48,6 +62,15 @@ SCENARIO = [
      ]},
     {"nom": "publier_variables", "fonction": "fonctions.scenario.publier_variables",
      "description": "Republie les réglages du module en variables globales"},
+    {"nom": "recalculer_machines", "fonction": "fonctions.scenario.recalculer_machines",
+     "description": "Recalcule les heures de lancement des machines, sans "
+                    "toucher au créneau du chauffe-eau (détail dans le Journal)",
+     "params": [
+         {"nom": "normales", "label": "Cycles normaux", "type": "nombre",
+          "placeholder": "inchangé", "largeur": 110},
+         {"nom": "courtes", "label": "Cycles courts", "type": "nombre",
+          "placeholder": "inchangé", "largeur": 110},
+     ]},
 ]
 
 

@@ -1,0 +1,80 @@
+{# Bloc tableau de bord : heures de lancement des machines (lave-linge lancé à la main). #}
+<form method="post" action="{% url 'core:module_tab' 'heure_demarrage' %}"
+      class="d-flex flex-wrap align-items-end gap-2 mb-3">
+  {% csrf_token %}
+  <input type="hidden" name="action" value="machines">
+  <input type="hidden" name="retour" value="dashboard">
+  <div>
+    <label class="form-label small text-secondary mb-1" for="blocMachinesNormal">Cycles normaux</label>
+    <input type="number" class="form-control form-control-sm" style="width:6rem"
+           id="blocMachinesNormal" name="machines_normal"
+           min="0" max="{{ max_machines }}" value="{{ demandes.normal }}">
+  </div>
+  <div>
+    <label class="form-label small text-secondary mb-1" for="blocMachinesCourt">Cycles courts</label>
+    <input type="number" class="form-control form-control-sm" style="width:6rem"
+           id="blocMachinesCourt" name="machines_court"
+           min="0" max="{{ max_machines }}" value="{{ demandes.court }}">
+  </div>
+  <button class="btn btn-sm btn-primary">Calculer</button>
+  {% if p.a_des_passees %}
+    {# Le calcul suppose lancées les machines dont l'heure est passée. #}
+    <button class="btn btn-sm btn-outline-secondary" name="tout" value="1"
+            title="Replacer toutes les machines, y compris celles dont l'heure est passée">
+      Tout replanifier</button>
+  {% endif %}
+</form>
+
+{% if p.jamais_calcule %}
+  <p class="text-secondary small mb-0">Indiquer le nombre de machines à faire aujourd'hui,
+    puis « Calculer ».</p>
+{% elif not p.cycles %}
+  <p class="text-secondary small mb-0">Aucune machine prévue aujourd'hui.</p>
+{% else %}
+  {% if p.perime %}
+    <p class="small text-warning mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Plan
+      calculé un autre jour — relancer « Calculer ».</p>
+  {% endif %}
+
+  {% for c in p.cycles %}
+    <div class="d-flex justify-content-between align-items-center py-2 {% if not forloop.last %}border-bottom{% endif %}"
+         {% if c.passe %}style="opacity:.55"{% endif %}>
+      <div>
+        <span class="fs-4 fw-bold lh-1"
+              style="color:{% if c.conseil == 'jour' %}#f59e0b{% else %}#93c5fd{% endif %}">
+          {{ c.heure|default:"—" }}</span>
+        <span class="ms-2">{{ c.libelle }}</span>
+        <div class="small text-secondary">
+          {% if c.passe %}
+            supposée lancée
+          {% elif c.conseil == "hc" %}
+            heures creuses, à partir de {{ c.heure }}
+            {% if c.debut %}— moins cher qu'à {{ c.debut|date:"H:i" }}
+              ({{ c.cout_jour_c|floatformat:1 }} cts){% else %}— plus de créneau en journée{% endif %}
+          {% elif c.conseil == "jour" %}
+            jusqu'à {{ c.fin|date:"H:i" }} ·
+            solaire {{ c.solaire_kwh|floatformat:2 }} sur {{ c.kwh|floatformat:2 }} kWh
+            {% if c.avec_ballon %}· en même temps que le chauffe-eau{% endif %}
+          {% else %}
+            plus de créneau aujourd'hui
+          {% endif %}
+        </div>
+      </div>
+      {% if c.cout_c is not None %}
+        <div class="text-end text-nowrap ms-2">
+          <span class="fw-bold">{{ c.cout_c|floatformat:1 }}</span> <span class="small">cts</span>
+        </div>
+      {% endif %}
+    </div>
+  {% endfor %}
+
+  {% if p.erreur %}
+    <p class="small text-warning mb-0 mt-2"><i class="bi bi-exclamation-triangle me-1"></i>{{ p.erreur }}</p>
+  {% endif %}
+  {% if p.quand %}
+    <p class="small text-secondary mb-0 mt-2">Calculé à {{ p.quand|date:"H:i" }}
+      {% if p.ballon and not p.ballon.termine %}
+        · chauffe-eau prioritaire de {{ p.ballon.debut|date:"H:i" }} à {{ p.ballon.fin|date:"H:i" }}
+      {% endif %}</p>
+  {% endif %}
+{% endif %}

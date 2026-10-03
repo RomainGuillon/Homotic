@@ -5,15 +5,39 @@
 # conserver la présente mention de copyright.
 # Voir le fichier LICENSE à la racine du dépôt.
 
-"""Bloc « Heure de démarrage » du tableau de bord : heure calculée pour le
-chauffe-eau, mode retenu et créneau solaire."""
+"""Blocs du tableau de bord : l'heure calculée pour le chauffe-eau (mode
+retenu, créneau solaire) et les heures de lancement des machines."""
 
 from django.template.loader import render_to_string
 
-from ..fonctions import calcul
+from ..fonctions import api, calcul, machines
 
 
-def bloc(request):
-    # Lecture du dernier calcul mémorisé : afficher le tableau de bord ne
-    # doit pas déplacer l'heure de démarrage (voir calcul.dernier_resultat).
-    return render_to_string("heure_demarrage/_bloc.html", {"r": calcul.dernier_resultat()})
+def blocs(request):
+    # Lecture des derniers calculs mémorisés : afficher le tableau de bord
+    # ne doit déplacer ni l'heure du ballon ni celles des machines (voir
+    # calcul.dernier_resultat).
+    return [
+        {
+            # Sans titre ni icône : le bloc garde ceux du module, comme
+            # avant l'arrivée du second bloc.
+            "html": render_to_string(
+                "heure_demarrage/_bloc.html", {"r": calcul.dernier_resultat()}
+            ),
+        },
+        {
+            "titre": "Machines",
+            "icone": "basket",
+            # « request » : le bloc contient un formulaire, il lui faut le
+            # jeton CSRF.
+            "html": render_to_string(
+                "heure_demarrage/_bloc_machines.html",
+                {
+                    "p": machines.dernier_resultat(),
+                    "demandes": api.machines_demandees(),
+                    "max_machines": api.MAX_MACHINES,
+                },
+                request=request,
+            ),
+        },
+    ]
