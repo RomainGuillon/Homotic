@@ -56,7 +56,8 @@
         <div class="fs-4 fw-bold">{{ r.duree_min }}<span class="fs-6"> min</span></div>
         <div class="small text-secondary">Durée de chauffe ·
           {% if r.estimation.disponible %}
-            estimée, ballon à {{ r.estimation.temperature }} °C
+            estimée, ballon à {{ r.estimation.temperature }} °C{% if r.estimation.ecart_depart %}
+              (attendu à {{ r.estimation.temperature_depart }} °C au départ){% endif %}
             <br><span class="text-faint">{{ r.besoin_kwh|floatformat:2 }} kWh{% if r.estimation.chauffes %},
               d'après {{ r.estimation.chauffes }} chauffes{% endif %}</span>
           {% else %}

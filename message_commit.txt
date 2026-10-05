@@ -1,26 +1,28 @@
-Chauffe-eau : mesure de l'écart de température entre le calcul et la chauffe
+Chauffe-eau : l'écart avant la chauffe est retiré de la température avant d'estimer
 
 L'estimation de la durée part de la température du ballon au moment du
-calcul, parfois plusieurs heures avant le départ. Si de l'eau est tirée
-entre-temps, le ballon part plus froid et la chauffe dure plus longtemps
-que prévu. Avant de corriger quoi que ce soit, on mesure.
+calcul, alors que le ballon part souvent plus froid quelques heures plus
+tard. Le suivi mesure cet écart depuis le commit précédent ; à partir de
+dix chauffes mesurées, l'estimation en tient compte.
 
-- le créneau publié par Heure de démarrage (creneau_retenu) porte deux
-  clés de plus : temperature, celle du ballon annoncée par l'estimation,
-  et calcule_a, l'instant du calcul. None quand ils sont inconnus ;
-- le suivi les fige au démarrage avec le reste de la prévision : champs
-  prevu_temp et prevu_calcule_a de ChauffeSession (migration 0004). Les
-  chauffes déjà enregistrées gardent ces champs vides ;
-- bloc « Entre le calcul et la chauffe » dans l'onglet : écart moyen au
-  départ, délai moyen entre le calcul et le départ, et le même écart
-  traduit en minutes de chauffe avec la pente du modèle. Sur les vingt
-  dernières chauffes parties à l'heure prévue ; une prévision vieille de
-  plus de vingt heures n'entre pas dans la moyenne ;
-- chaque ligne du tableau et le Journal rappellent la température et le
-  délai de la prévision.
+- modele.estimation : dès que le bilan du départ a ses dix chauffes,
+  l'écart moyen est ajouté à la température lue, et la durée est estimée
+  sur cette température attendue au départ. Lu à 51,2 °C avec 2,5 °C
+  perdus en moyenne : estimé pour un départ à 48,7 °C ;
+- c'est la température attendue au départ qui doit tomber dans la plage
+  connue de la droite — sinon pas d'estimation, comme avant ;
+- la température publiée (clé temperature) et celle que le suivi garde
+  avec chaque chauffe restent la température lue, jamais la corrigée :
+  l'écart mesuré est celui du ballon, la correction ne se corrige pas
+  elle-même ;
+- l'objet estimation_chauffe gagne temperature_depart, ecart_depart
+  (None tant que l'écart n'est pas appliqué) et chauffes_ecart ;
+- réglage modele_corriger_depart (« oui » par défaut), dans le
+  paramétrage de l'onglet : « Mesuré seulement » coupe la correction
+  sans arrêter la mesure ;
+- l'onglet Chauffe-eau, l'onglet Heure de démarrage et le détail du
+  calcul disent « attendu à … °C au départ » quand la correction joue.
 
-Rien n'est corrigé : l'estimation et le calcul de l'heure sont inchangés.
-À partir de dix chauffes mesurées, le bloc dit qu'il y en a assez pour
-décider d'une correction.
+Tant qu'il y a moins de dix chauffes mesurées, rien ne change.
 
 Documentation (FR, EN, DE) mise à jour.

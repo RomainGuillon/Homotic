@@ -96,8 +96,9 @@ def _duree_et_besoin():
 
     ``estimation`` est mémorisée avec le calcul, pour que l'écran et le
     Journal disent sur quoi la durée repose : ``None`` si rien n'est
-    branché, sinon ``{"disponible", "temperature", "chauffes", "bornee",
-    "raison"}`` — ``raison`` expliquant un repli.
+    branché, sinon ``{"disponible", "temperature", "temperature_depart",
+    "ecart_depart", "chauffes", "bornee", "raison"}`` — ``raison``
+    expliquant un repli.
     """
     from core.liaisons import lire_besoin
 
@@ -114,6 +115,10 @@ def _duree_et_besoin():
     estimation = {
         "disponible": duree > 0 and besoin > 0,
         "temperature": annonce.get("temperature"),
+        # Température attendue au départ, quand le fournisseur corrige la
+        # température lue de l'écart habituel entre le calcul et la chauffe.
+        "temperature_depart": annonce.get("temperature_depart"),
+        "ecart_depart": annonce.get("ecart_depart"),
         "chauffes": annonce.get("chauffes"),
         "bornee": bool(annonce.get("bornee")),
         "raison": str(annonce.get("raison") or ""),
@@ -132,6 +137,13 @@ def _donnees_de_chauffe(r):
             if isinstance(estimation.get("temperature"), (int, float))
             else "état du ballon"
         )
+        ecart = estimation.get("ecart_depart")
+        depart = estimation.get("temperature_depart")
+        if isinstance(ecart, (int, float)) and ecart and isinstance(depart, (int, float)):
+            ballon += (
+                f", attendu à {depart:g} °C au départ ({ecart:+g} °C en moyenne "
+                f"entre le calcul et la chauffe)"
+            ).replace(".", ",")
         texte = (
             f"Données : {ballon} → durée de chauffe estimée {r['duree_min']} min"
             f"{' (ramenée à la borne réglée)' if estimation.get('bornee') else ''} ; "

@@ -416,6 +416,16 @@
               <div class="form-text">Tolérance autour des températures de départ déjà
                 vues. Au-delà, pas d'estimation.</div>
             </div>
+            <div class="col-12 col-md-5">
+              <label class="form-label">Écart entre le calcul et la chauffe</label>
+              <select name="modele_corriger_depart" class="form-select">
+                <option value="oui" {% if params.corriger_depart %}selected{% endif %}>Pris en compte dans l'estimation</option>
+                <option value="non" {% if not params.corriger_depart %}selected{% endif %}>Mesuré seulement</option>
+              </select>
+              <div class="form-text">Le ballon part souvent plus froid qu'il n'était au
+                moment du calcul. À partir de dix chauffes mesurées, cet écart moyen est
+                retiré de la température lue avant d'estimer.</div>
+            </div>
           </div>
           <div class="row g-3 mb-4">
             <div class="col-12 col-md-4">
@@ -533,7 +543,11 @@
                     </div>
                     <div class="col-6 col-md-3">
                       <div class="fs-5 fw-bold">{{ es.temperature }} °C</div>
-                      <div class="small text-secondary">ballon en ce moment</div>
+                      <div class="small text-secondary">ballon en ce moment
+                        {% if es.ecart_depart != None %}
+                          <br><span class="text-faint">attendu à {{ es.temperature_depart }} °C
+                            au départ</span>
+                        {% endif %}</div>
                     </div>
                     <div class="col-6 col-md-3">
                       <div class="fs-5 fw-bold">±&nbsp;{{ mo.erreur_min }} min</div>
@@ -591,20 +605,26 @@
                 <p class="small text-secondary mb-0">
                   Écart = température au départ − température au moment du calcul :
                   négatif, le ballon est parti plus froid que la prévision ne le supposait.
-                  {% if d.suffisant %}
-                    {{ d.nombre }} chauffes mesurées : assez pour décider s'il faut en
-                    tenir compte dans l'estimation.
+                  {% if suivi.modele.correction.appliquee %}
+                    <strong>Cet écart est pris en compte</strong> : il est retiré de la
+                    température du ballon avant d'estimer la chauffe
+                    ({{ d.nombre }} chauffes mesurées).
+                  {% elif d.suffisant %}
+                    {{ d.nombre }} chauffes mesurées, mais l'écart n'est
+                    <strong>pas pris en compte</strong> : la correction est réglée sur
+                    « Mesuré seulement » dans le paramétrage.
                   {% else %}
-                    {{ d.nombre }} chauffe{{ d.nombre|pluralize }} mesurée{{ d.nombre|pluralize }},
-                    il en faut {{ d.minimum }} pour en tirer une conclusion.
-                  {% endif %}
-                  Rien n'est corrigé pour l'instant.</p>
+                    {{ d.nombre }} chauffe{{ d.nombre|pluralize }} mesurée{{ d.nombre|pluralize }} :
+                    il en faut {{ d.minimum }} pour que l'écart soit pris en compte dans
+                    l'estimation.
+                  {% endif %}</p>
               {% else %}
                 <p class="text-secondary small mb-0">L'estimation part de la température du
                   ballon au moment du calcul, parfois des heures avant la chauffe. Cette
                   température et l'heure du calcul sont désormais gardées avec chaque
                   chauffe partie à l'heure prévue : l'écart avec la température de départ
-                  s'affichera ici dès la première.</p>
+                  s'affichera ici dès la première, et sera pris en compte dans l'estimation
+                  à partir de dix.</p>
               {% endif %}
             </div>
           {% endwith %}

@@ -188,21 +188,28 @@ mieux qu'un import.
 # creneau_retenu — l'heure effectivement retenue, forçage manuel compris.
 # duree_min et besoin_kwh sont la prévision du cycle : le temps et l'énergie
 # que le calcul a comptés pour la chauffe. temperature et calcule_a disent
-# sur quoi elle repose : la température du ballon annoncée par l'estimation
-# et l'instant du calcul (heure locale). None l'un comme l'autre quand ils
+# sur quoi elle repose : la température du ballon lue par l'estimation
+# (jamais la température corrigée de l'écart avant départ) et l'instant
+# du calcul (heure locale). None l'un comme l'autre quand ils
 # sont inconnus — pas d'estimation branchée, heure saisie sans calcul.
 {"heure": "13:30", "duree_min": 60, "besoin_kwh": 2.5, "mode": "solaire",
  "forcee": False, "perime": False,
  "temperature": 50.5, "calcule_a": "2026-10-05T11:00:12"}
 
-# estimation_chauffe — ce que demanderait une chauffe qui partirait
+# estimation_chauffe — ce que demandera la chauffe qu'on planifie
 # maintenant. Toujours un objet, même quand il n'y a pas d'estimation :
 # disponible vaut alors False, duree_min et besoin_kwh valent None, et
 # raison dit pourquoi (« ballon à 38 °C, hors de la plage connue… »).
-# temperature : celle du ballon qui a servi ; chauffes : combien de chauffes
-# ont réglé le modèle ; bornee : la durée a été ramenée à une borne réglée.
-{"disponible": True, "duree_min": 46, "besoin_kwh": 1.84,
- "temperature": 50.0, "chauffes": 25, "bornee": False, "raison": ""}
+# temperature : celle du ballon telle qu'elle est lue. temperature_depart :
+# celle qu'on attend au départ, sur laquelle la durée est estimée — la
+# température lue, corrigée de ecart_depart, l'écart moyen mesuré entre le
+# calcul et le départ (None tant qu'il n'est pas appliqué ; les deux
+# températures sont alors égales). chauffes / chauffes_ecart : combien de
+# chauffes ont réglé le modèle / mesuré l'écart. bornee : la durée a été
+# ramenée à une borne réglée.
+{"disponible": True, "duree_min": 50, "besoin_kwh": 2.0,
+ "temperature": 52.0, "temperature_depart": 50.0, "ecart_depart": -2.0,
+ "chauffes": 25, "chauffes_ecart": 12, "bornee": False, "raison": ""}
 ```
 
 Un fournisseur qui ne peut pas répondre renvoie `None` (Tempo sans couleur

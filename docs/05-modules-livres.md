@@ -596,13 +596,13 @@ de la durée de chauffe*. Réduire le nombre de chauffes apprises fait suivre
 la saison plus vite, au prix d'une droite plus sensible à une chauffe
 atypique.
 
-Ce que l'estimation ne sait pas : elle part de la température lue **au
-moment du calcul**. Si de l'eau est tirée entre le calcul et la chauffe, le
-ballon partira plus froid. Le bloc *Prévu contre réel* le montre.
+L'estimation est demandée **au moment du calcul**, parfois des heures avant
+la chauffe. Si de l'eau est tirée entre-temps, le ballon part plus froid
+que la température lue : c'est l'objet de la section suivante.
 
 ### Entre le calcul et la chauffe
 
-Pour savoir si cet écart compte, le suivi le **mesure**. Avec la prévision,
+Le suivi **mesure** cet écart, puis l'estimation en tient compte. Avec la prévision,
 chaque chauffe partie à l'heure prévue garde la température qu'avait le
 ballon au moment du calcul et l'heure de ce calcul. Le bloc **Entre le
 calcul et la chauffe** en fait la moyenne sur les vingt dernières :
@@ -617,8 +617,26 @@ Chaque ligne du tableau rappelle aussi « prévision faite à 51,5 °C, 2 h 30
 avant ». Une prévision vieille de plus de vingt heures (calcul non refait
 ce jour-là) n'entre pas dans la moyenne.
 
-**Rien n'est corrigé pour l'instant** : le bloc mesure, il ne modifie pas
-l'estimation. À partir de dix chauffes, il dit qu'il y en a assez pour
-décider. Si l'écart se révèle régulier, deux suites sont possibles : avancer
-le dernier recalcul plus près de la chauffe, ou retirer cet écart de la
-température avant d'estimer.
+**À partir de dix chauffes mesurées, l'écart moyen est retiré de la
+température lue avant d'estimer.** Ballon lu à 51,2 °C au moment du calcul,
+2,5 °C perdus en moyenne avant le départ : la durée est estimée pour un
+départ à 48,7 °C. L'onglet l'affiche (« attendu à 48,7 °C au départ »), le
+détail du calcul de l'heure aussi. Avant dix chauffes, l'écart est seulement
+mesuré.
+
+Trois choses à savoir :
+
+- c'est la température **attendue au départ** qui doit tomber dans la plage
+  connue de la droite. Un ballon lu dans la plage mais attendu en dessous
+  ne donne pas d'estimation — ce serait de l'extrapolation ;
+- la température gardée avec chaque chauffe reste la température **lue**,
+  jamais la corrigée : l'écart mesuré est ainsi celui du ballon, et la
+  correction ne se corrige pas elle-même ;
+- c'est une **moyenne** : elle suppose un délai à peu près régulier entre le
+  calcul et la chauffe. Si l'heure du dernier recalcul change beaucoup d'un
+  jour à l'autre, ou un jour où l'on tire bien plus d'eau que d'habitude, la
+  chauffe s'écartera de la prévision — le bloc *Prévu contre réel* le montre.
+
+La correction se coupe dans le paramétrage (*Écart entre le calcul et la
+chauffe* : « Mesuré seulement ») : l'écart continue d'être mesuré et
+affiché, sans entrer dans l'estimation.

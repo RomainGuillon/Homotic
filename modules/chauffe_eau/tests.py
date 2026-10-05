@@ -24,7 +24,10 @@ Ce qui est verrouillé ici :
   tirée, et se tait plutôt que de deviner (trop peu de chauffes, ballon
   hors de la plage connue) ;
 - la température du ballon au moment du calcul est gardée avec la chauffe,
-  pour mesurer de combien il bouge avant le départ — sans rien corriger.
+  pour mesurer de combien il bouge avant le départ ;
+- à partir de dix chauffes mesurées, cet écart moyen est retiré de la
+  température lue avant d'estimer — jamais avant, jamais si le réglage le
+  coupe, et c'est toujours la température lue qui est publiée et gardée.
 
 Les tables du module n'existent que s'il est activé dans la base qui a servi
 à lancer les tests : sinon ces tests sont sautés, plutôt que d'échouer sur
@@ -429,6 +432,109 @@ def _droite(nombre=15, premier_jour=0):
     for i in range(nombre):
         temperature = 45.0 + 10.0 * i / (nombre - 1)
         _chauffe(premier_jour + i, temperature, 200 - 3 * temperature)
+
+
+def _droite_mesuree(nombre=12, ecart=-2.0):
+    """``nombre`` chauffes planifiées sur la droite durée = 200 − 3 × départ
+    (départs de 45 °C, de degré en degré), dont la prévision avait été faite
+    2 h 30 plus tôt avec un ballon ``ecart`` degrés plus loin : parti 2 °C
+    plus froid que prévu, par défaut."""
+    for i in range(nombre):
+        depart = 45.0 + i
+        debut = a(13, 30) + timedelta(days=i)
+        _chauffe(i, depart, 200 - 3 * depart, prevu_heure="13:30",
+                 prevu_temp=depart - ecart,
+                 prevu_calcule_a=debut - timedelta(minutes=150))
+
+
+@skipUnless(MODULE_ACTIF, SANS_MODULE)
+class CorrectionDuDepart(TestCase):
+    """L'écart entre le calcul et la chauffe, retiré avant d'estimer."""
+
+    def test_a_partir_de_dix_chauffes_l_ecart_est_retire(self):
+        _droite_mesuree()
+        e = modele.estimation(52.0)
+        # Lu à 52 °C, attendu à 50 °C au départ : 200 − 3 × 50 = 50 min, et
+        # non les 44 min que donnerait la température lue.
+        self.assertTrue(e["disponible"])
+        self.assertEqual((e["duree_min"], e["besoin_kwh"]), (50, 2.0))
+        self.assertEqual(
+            (e["temperature"], e["temperature_depart"], e["ecart_depart"]),
+            (52.0, 50.0, -2.0),
+        )
+        self.assertEqual(e["chauffes_ecart"], 12)
+
+    def test_la_temperature_publiee_reste_celle_qui_est_lue(self):
+        """Sinon le suivi mesurerait l'écart de la correction, pas celui du
+        ballon, et la correction se corrigerait elle-même."""
+        _droite_mesuree()
+        self.assertEqual(modele.estimation(52.0)["temperature"], 52.0)
+
+    def test_neuf_chauffes_ne_suffisent_pas(self):
+        _droite(nombre=15, premier_jour=40)      # de quoi faire un modèle
+        _droite_mesuree(nombre=9)
+        correction = modele.correction_depart()
+        self.assertEqual((correction["appliquee"], correction["chauffes"]), (False, 9))
+        self.assertEqual(correction["ecart"], -2.0)   # mesuré, pas appliqué
+        e = modele.estimation(52.0)
+        self.assertEqual(e["duree_min"], 44)
+        self.assertEqual((e["temperature_depart"], e["ecart_depart"]), (52.0, None))
+        self.assertEqual(e["chauffes_ecart"], 0)
+
+    def test_la_dixieme_chauffe_declenche_la_correction(self):
+        _droite(nombre=15, premier_jour=40)
+        _droite_mesuree(nombre=10)
+        self.assertTrue(modele.correction_depart()["appliquee"])
+        self.assertEqual(modele.estimation(52.0)["duree_min"], 50)
+
+    def test_sans_aucune_mesure(self):
+        _droite()
+        correction = modele.correction_depart()
+        self.assertEqual(
+            (correction["appliquee"], correction["ecart"], correction["chauffes"]),
+            (False, None, 0),
+        )
+        self.assertEqual(modele.estimation(50.0)["temperature_depart"], 50.0)
+
+    def test_le_reglage_coupe_la_correction(self):
+        _droite_mesuree()
+        set_setting("modele_corriger_depart", "non", module=api.MODULE)
+        correction = modele.correction_depart()
+        self.assertEqual((correction["active"], correction["appliquee"]), (False, False))
+        self.assertEqual(modele.estimation(52.0)["duree_min"], 44)
+
+    def test_un_ballon_qui_part_plus_chaud_raccourcit(self):
+        _droite_mesuree(ecart=+1.0)
+        e = modele.estimation(50.0)
+        self.assertEqual((e["temperature_depart"], e["duree_min"]), (51.0, 47))
+
+    def test_c_est_la_temperature_attendue_qui_doit_etre_dans_la_plage(self):
+        """Plage connue 45–56 °C. Lu à 46,5 °C — dans la plage — mais attendu
+        à 43,5 °C au départ : ce serait de l'extrapolation."""
+        _droite_mesuree(ecart=-3.0)
+        e = modele.estimation(46.5)
+        self.assertFalse(e["disponible"])
+        self.assertIn("ballon à 46,5 °C, attendu à 43,5 °C au départ, hors de la plage", e["raison"])
+        # Et l'inverse : lu au-dessus de la plage, attendu dedans.
+        self.assertTrue(modele.estimation(58.5)["disponible"])
+
+    def test_la_correction_suit_les_dernieres_chauffes(self):
+        """L'écart est une moyenne glissante : il suit les habitudes."""
+        _droite_mesuree(nombre=12, ecart=-2.0)
+        for i in range(suivi.DEPART_CHAUFFES_MAX):
+            depart = 45.0 + i % 10
+            debut = a(13, 30) + timedelta(days=30 + i)
+            _chauffe(30 + i, depart, 200 - 3 * depart, prevu_heure="13:30",
+                     prevu_temp=depart + 4.0,
+                     prevu_calcule_a=debut - timedelta(minutes=150))
+        self.assertEqual(modele.correction_depart()["ecart"], -4.0)
+
+    def test_une_panne_du_bilan_ne_coute_pas_l_estimation(self):
+        _droite()
+        with mock.patch.object(suivi, "bilan_depart", side_effect=RuntimeError("boum")):
+            e = modele.estimation(50.0)
+        self.assertEqual((e["disponible"], e["duree_min"]), (True, 50))
+        self.assertIsNone(e["ecart_depart"])
 
 
 @skipUnless(MODULE_ACTIF, SANS_MODULE)
@@ -853,9 +959,25 @@ class OngletDuSuivi(TestCase):
         self.assertContains(page, "-4,6 °C")
         self.assertContains(page, "2 h 30")
         self.assertContains(page, "prévision faite à 51,5 °C")
-        self.assertContains(page, "1 chauffe mesurée,")
-        self.assertContains(page, "il en faut 10 pour en tirer une conclusion")
-        self.assertContains(page, "Rien n'est corrigé pour l'instant")
+        self.assertContains(page, "1 chauffe mesurée :")
+        self.assertContains(page, "il en faut 10 pour que l'écart soit pris en compte")
+        self.assertNotContains(page, "Cet écart est pris en compte")
+
+    def test_la_correction_appliquee_se_voit(self):
+        _droite_mesuree()
+        with mock.patch.object(api, "get_status_cached",
+                               return_value=({"temperature": 52.0}, None, "")):
+            page = self.client.get(self.URL)
+        self.assertContains(page, "Cet écart est pris en compte")
+        self.assertContains(page, "attendu à 50,0 °C")
+        self.assertContains(page, "50 min")          # et non 44 : estimé à 50 °C
+
+    def test_la_correction_coupee_se_voit(self):
+        _droite_mesuree()
+        self.client.post(self.URL, {"action": "params", "modele_corriger_depart": "non"})
+        page = self._page()
+        self.assertContains(page, "pas pris en compte")
+        self.assertNotContains(page, "Cet écart est pris en compte")
 
     def test_les_reglages_du_modele_s_enregistrent(self):
         self.client.post(self.URL, {
@@ -866,6 +988,12 @@ class OngletDuSuivi(TestCase):
             "modele_chauffes_max": 15, "modele_chauffes_min": 8, "modele_duree_min": 20,
             "modele_duree_max": 90, "modele_marge_degres": 0,
         })
+        # Un formulaire qui ne porte pas le choix ne coupe pas la correction.
+        self.assertTrue(modele.correction_active())
+        self.client.post(self.URL, {"action": "params", "modele_corriger_depart": "non"})
+        self.assertFalse(modele.correction_active())
+        self.client.post(self.URL, {"action": "params", "modele_corriger_depart": "oui"})
+        self.assertTrue(modele.correction_active())
 
     def test_verdict_et_ou_corriger(self):
         with _besoins():

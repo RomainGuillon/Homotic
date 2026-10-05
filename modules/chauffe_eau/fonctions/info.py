@@ -124,11 +124,15 @@ def absence_jours_restants():
 def estimation_chauffe():
     """Estimation de la prochaine chauffe (liaison entre modules, type « objet »).
 
-    ``{"disponible": True, "duree_min": 46, "besoin_kwh": 1.84,
-       "temperature": 50.0, "chauffes": 25, "bornee": False, "raison": ""}``
+    ``{"disponible": True, "duree_min": 50, "besoin_kwh": 2.0,
+       "temperature": 52.0, "temperature_depart": 50.0, "ecart_depart": -2.0,
+       "chauffes": 25, "chauffes_ecart": 12, "bornee": False, "raison": ""}``
 
-    Durée et énergie d'une chauffe qui partirait maintenant, d'après la
-    température du ballon et les dernières chauffes mesurées. ``disponible``
+    Durée et énergie de la chauffe qu'on planifie maintenant, d'après la
+    température du ballon et les dernières chauffes mesurées. La durée est
+    estimée sur ``temperature_depart`` : la température lue, corrigée de
+    l'écart habituel entre le calcul et le départ (``ecart_depart``, ``None``
+    tant qu'il n'est pas appliqué). ``disponible``
     faux : le modèle préfère se taire (trop peu de chauffes, ballon hors de
     la plage connue…), ``raison`` dit pourquoi et les deux valeurs sont à
     ``None`` — au consommateur de retomber sur ses propres réglages.

@@ -55,6 +55,12 @@ def _save_params(request):
         except ValueError:
             pass
 
+    # Liste déroulante et non case à cocher : un champ absent du formulaire
+    # ne doit pas couper la correction.
+    corriger = request.POST.get("modele_corriger_depart", "").strip().lower()
+    if corriger in ("oui", "non"):
+        set_setting("modele_corriger_depart", corriger, module=api.MODULE)
+
     for champ in ("douches_chauffe", "douches_veille"):
         raw = request.POST.get(champ, "").strip()
         try:
@@ -171,6 +177,7 @@ def onglet(request):
             "mode_absence": get_setting("mode_absence", module=api.MODULE, default=""),
             "capacites": get_setting("capacites", module=api.MODULE, default=""),
             "modele": modele.reglages(),
+            "corriger_depart": modele.correction_active(),
         },
     }
 

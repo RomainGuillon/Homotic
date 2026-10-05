@@ -40,10 +40,21 @@ lit l'estimation retombe alors sur ses propres réglages :
   ``modele_duree_max`` : quelques chauffes atypiques ne peuvent pas faire
   sortir une valeur absurde.
 
-Ce que le modèle ne sait pas : l'estimation part de la température lue au
-moment où on la demande. Si le calcul a lieu bien avant la chauffe et que
-de l'eau est tirée entre-temps, le ballon partira plus froid que prévu. Le
-bilan « prévu contre réel » du suivi le montrera.
+Entre le calcul et la chauffe. L'estimation est demandée au moment du
+calcul, parfois des heures avant le départ ; si de l'eau est tirée
+entre-temps, le ballon part plus froid que la température lue. Le suivi
+mesure cet écart sur les chauffes passées (``suivi.bilan_depart``), et dès
+qu'il en a assez (10), on le **retire de la température lue** avant de
+lire la droite : c'est la température attendue au départ qui est estimée,
+et c'est elle qui doit tomber dans la plage connue. La température lue est
+publiée telle quelle, sans la correction — c'est elle que le suivi garde
+pour continuer à mesurer l'écart, sinon la correction se corrigerait
+elle-même. Réglage ``modele_corriger_depart`` (« oui » par défaut).
+
+C'est une moyenne : elle suppose que le calcul précède la chauffe d'un
+délai à peu près régulier. Un jour où l'on tire beaucoup plus d'eau que
+d'habitude, la chauffe durera plus longtemps que prévu ; le bilan « prévu
+contre réel » du suivi le montre.
 """
 
 from core.services import get_setting
@@ -77,6 +88,46 @@ def reglage(cle):
 
 def reglages():
     return {cle: reglage(cle) for cle in REGLAGES}
+
+
+def correction_active():
+    """Vrai si l'écart entre le calcul et la chauffe doit être pris en compte."""
+    valeur = str(get_setting("modele_corriger_depart", module=MODULE, default="oui"))
+    return valeur.strip().lower() not in ("non", "false", "0", "off")
+
+
+def correction_depart():
+    """L'écart à appliquer à la température lue avant d'estimer.
+
+    ``{"active", "appliquee", "ecart", "chauffes", "minimum"}`` :
+
+    - ``ecart`` : l'écart moyen mesuré entre la température au moment du
+      calcul et celle du départ (négatif : le ballon part plus froid), ou
+      ``None`` tant que rien n'a été mesuré ;
+    - ``appliquee`` : vrai si cet écart est réellement retiré — réglage
+      actif **et** assez de chauffes mesurées (``minimum``) ;
+    - ``active`` : le réglage seul, pour dire à l'écran pourquoi un écart
+      mesuré n'est pas appliqué.
+
+    Ne lève jamais : sans mesure exploitable, pas de correction.
+    """
+    reponse = {"active": correction_active(), "appliquee": False, "ecart": None,
+               "chauffes": 0, "minimum": 0}
+    try:
+        from . import suivi
+
+        bilan = suivi.bilan_depart()
+        reponse.update({
+            "ecart": bilan.get("ecart_moyen"),
+            "chauffes": bilan["nombre"],
+            "minimum": bilan["minimum"],
+        })
+        reponse["appliquee"] = bool(
+            reponse["active"] and bilan["suffisant"] and reponse["ecart"] is not None
+        )
+    except Exception:
+        pass
+    return reponse
 
 
 def chauffes_apprentissage():
@@ -194,28 +245,42 @@ def _temperature_du_ballon():
 
 
 def estimation(temperature=None):
-    """Durée et énergie d'une chauffe qui partirait maintenant.
+    """Durée et énergie de la chauffe qu'on planifie maintenant.
 
     Toujours un dictionnaire, pour que celui qui le lit sache **pourquoi**
     il n'y a pas d'estimation ::
 
-        {"disponible": True, "duree_min": 46, "besoin_kwh": 1.84,
-         "temperature": 50.0, "chauffes": 25, "bornee": False, "raison": ""}
+        {"disponible": True, "duree_min": 50, "besoin_kwh": 2.0,
+         "temperature": 52.0, "temperature_depart": 50.0, "ecart_depart": -2.0,
+         "chauffes": 25, "chauffes_ecart": 12, "bornee": False, "raison": ""}
 
     ``disponible`` faux : ``duree_min`` et ``besoin_kwh`` valent ``None`` et
     ``raison`` dit pourquoi. ``bornee`` : la durée calculée sortait des
     bornes réglées, elle a été ramenée à la borne.
 
-    ``temperature`` : par défaut celle du ballon, lue comme les autres infos
-    du module dans le cache du statut.
+    ``temperature`` : celle du ballon **telle qu'elle est lue** (par défaut
+    dans le cache du statut, comme les autres infos du module).
+    ``temperature_depart`` : celle qu'on attend au départ de la chauffe, et
+    sur laquelle la durée est estimée — la température lue, corrigée de
+    l'écart moyen mesuré entre le calcul et le départ. ``ecart_depart`` est
+    cet écart (``None`` tant qu'il n'est pas appliqué : les deux
+    températures sont alors égales) et ``chauffes_ecart`` le nombre de
+    chauffes qui l'ont mesuré.
     """
     m = modele()
     if temperature is None:
         temperature = _temperature_du_ballon()
+    correction = correction_depart()
+    depart = temperature
+    if temperature is not None and correction["appliquee"]:
+        depart = round(temperature + correction["ecart"], 1)
     reponse = {
         "disponible": False, "duree_min": None, "besoin_kwh": None,
-        "temperature": temperature, "chauffes": m["nombre"], "bornee": False,
-        "raison": "",
+        "temperature": temperature, "temperature_depart": depart,
+        "ecart_depart": correction["ecart"] if correction["appliquee"] else None,
+        "chauffes": m["nombre"],
+        "chauffes_ecart": correction["chauffes"] if correction["appliquee"] else 0,
+        "bornee": False, "raison": "",
     }
     if not m["fiable"]:
         reponse["raison"] = m["raison"]
@@ -225,14 +290,17 @@ def estimation(temperature=None):
         return reponse
 
     marge = max(0, reglage("modele_marge_degres"))
-    if not (m["temp_min"] - marge <= temperature <= m["temp_max"] + marge):
+    if not (m["temp_min"] - marge <= depart <= m["temp_max"] + marge):
+        attendu = (
+            f", attendu à {_fr(depart)} °C au départ" if correction["appliquee"] else ""
+        )
         reponse["raison"] = (
-            f"ballon à {_fr(temperature)} °C, hors de la plage connue "
+            f"ballon à {_fr(temperature)} °C{attendu}, hors de la plage connue "
             f"({_fr(m['temp_min'])} à {_fr(m['temp_max'])} °C)"
         )
         return reponse
 
-    duree = m["constante"] + m["pente"] * temperature
+    duree = m["constante"] + m["pente"] * depart
     mini = max(1, reglage("modele_duree_min"))
     maxi = max(mini, reglage("modele_duree_max"))
     bornee = not (mini <= duree <= maxi)

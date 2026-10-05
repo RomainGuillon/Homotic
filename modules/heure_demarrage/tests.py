@@ -1034,6 +1034,28 @@ class DureeEstimeeParLeBallon(TestCase):
         self.assertLessEqual(avant, calcule_a)
         self.assertLessEqual(calcule_a, datetime.now())
 
+    def test_l_ecart_avant_la_chauffe_est_dit_et_la_temperature_lue_publiee(self):
+        """Le fournisseur a estimé sur la température attendue au départ.
+        Le détail le dit ; le créneau publié garde la température **lue**,
+        celle que le suivi comparera au départ réel."""
+        corrigee = dict(ESTIMEE, duree_min=52, besoin_kwh=2.08, temperature=50.5,
+                        temperature_depart=48.5, ecart_depart=-2.0, chauffes_ecart=12)
+        with _estimation(corrigee):
+            r = self._calculer()
+
+        self.assertEqual((r["duree_min"], r["besoin_kwh"]), (52, 2.08))
+        self.assertIn(
+            "ballon à 50,5 °C, attendu à 48,5 °C au départ (-2 °C en moyenne entre "
+            "le calcul et la chauffe) → durée de chauffe estimée 52 min",
+            r["detail"][0],
+        )
+        self.assertEqual(info.creneau_retenu()["temperature"], 50.5)
+
+    def test_sans_ecart_applique_le_detail_ne_parle_pas_de_depart(self):
+        with _estimation(dict(ESTIMEE, temperature_depart=50.5, ecart_depart=None)):
+            r = self._calculer()
+        self.assertNotIn("attendu à", r["detail"][0])
+
     def test_la_temperature_est_publiee_meme_quand_l_estimation_se_tait(self):
         """Ballon hors plage : durée des réglages, mais la température lue
         reste bonne à garder."""

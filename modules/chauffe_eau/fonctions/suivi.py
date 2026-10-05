@@ -50,9 +50,12 @@ au démarrage si la chauffe part à l'heure prévue : le modèle de durée
 Entre le calcul et la chauffe : la prévision repose sur la température du
 ballon au moment du calcul, parfois des heures avant le départ. Avec la
 prévision, on fige donc cette température et l'heure du calcul ;
-``bilan_depart`` dit de combien le ballon a bougé entre les deux. Rien
-n'est corrigé pour l'instant : on mesure d'abord, pour savoir si l'écart
-mérite une correction et laquelle.
+``bilan_depart`` dit de combien le ballon a bougé entre les deux. À partir
+de ``DEPART_CHAUFFES_MIN`` chauffes mesurées, le modèle de durée retire
+cet écart moyen de la température lue avant d'estimer (``modele.py``).
+C'est toujours la température **lue** qui est figée ici, jamais la
+température corrigée : l'écart mesuré reste ainsi celui du ballon, pas
+celui de la correction.
 """
 
 from datetime import datetime, timedelta
@@ -478,8 +481,9 @@ def bilan_depart():
     parti plus froid qu'au moment du calcul.
 
     ``minutes`` traduit l'écart moyen en minutes de chauffe, avec la pente
-    du modèle de durée : c'est ce qui dit si l'écart vaut une correction.
-    ``suffisant`` : assez de chauffes pour s'y fier.
+    du modèle de durée : c'est ce que vaut la correction.
+    ``suffisant`` : assez de chauffes pour s'y fier — c'est le seuil à
+    partir duquel ``modele.estimation`` retire l'écart moyen.
     """
     from ..models import ChauffeSession
 
@@ -594,6 +598,7 @@ def _modele_pour_l_onglet():
     try:
         from . import modele
 
-        return {"modele": modele.modele(), "estimation": modele.estimation()}
+        return {"modele": modele.modele(), "estimation": modele.estimation(),
+                "correction": modele.correction_depart()}
     except Exception as exc:
         return {"erreur": str(exc)}
