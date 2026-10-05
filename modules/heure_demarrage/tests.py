@@ -22,7 +22,7 @@ from unittest import mock
 from django.test import SimpleTestCase, TestCase, modify_settings
 
 from core.models import LogEntry, Module
-from core.services import get_setting, get_variable, set_setting
+from core.services import get_setting, get_variable, set_setting, set_variable
 from core.tests import connecte
 
 from .fonctions import api, calcul, info, machines, scenario
@@ -565,6 +565,34 @@ class ChauffeEauInchange(TestCase):
                 module=api.MODULE, level=LogEntry.ERROR, message__contains="boum"
             ).exists()
         )
+
+
+class PrevisionPubliee(TestCase):
+    """Le créneau publié porte la prévision du cycle : durée et énergie.
+
+    C'est ce que le suivi du chauffe-eau fige au démarrage de la chauffe
+    pour le rapprocher de ce qu'il mesure.
+    """
+
+    def test_l_energie_est_celle_du_calcul_pas_du_reglage(self):
+        _ballon("13:30")  # calculé avec 2,4 kWh
+        set_setting("conso_chauffe_eau", "3.00", module=api.MODULE)  # modifié après
+
+        creneau = info.creneau_retenu()
+        self.assertEqual(
+            (creneau["heure"], creneau["duree_min"], creneau["besoin_kwh"]),
+            ("13:30", 60, 2.4),
+        )
+
+    def test_sans_calcul_le_reglage_tient_lieu_de_prevision(self):
+        set_variable("heure_demarrage_chauffe_eau", "04:30")  # saisie à la main
+        set_setting("conso_chauffe_eau", "2.10", module=api.MODULE)
+
+        creneau = info.creneau_retenu()
+        self.assertEqual((creneau["heure"], creneau["besoin_kwh"]), ("04:30", 2.1))
+
+    def test_aucune_heure_aucune_prevision(self):
+        self.assertIsNone(info.creneau_retenu())
 
 
 @modify_settings(INSTALLED_APPS={"append": "modules.heure_demarrage"})

@@ -71,11 +71,15 @@ def heure_calcul():
 def creneau_retenu():
     """Créneau de chauffe retenu (liaison entre modules, type « objet »).
 
-    ``{"heure": "13:30", "duree_min": 60, "mode": "solaire",
-       "forcee": False, "perime": False}`` — ou ``None`` si aucune heure
-    n'est retenue. ``forcee`` signale une heure saisie à la main, ``perime``
-    un calcul qui date d'un autre jour : au consommateur de décider ce qu'il
-    en fait.
+    ``{"heure": "13:30", "duree_min": 60, "besoin_kwh": 2.5,
+       "mode": "solaire", "forcee": False, "perime": False}`` — ou ``None``
+    si aucune heure n'est retenue. ``forcee`` signale une heure saisie à la
+    main, ``perime`` un calcul qui date d'un autre jour : au consommateur de
+    décider ce qu'il en fait.
+
+    ``duree_min`` et ``besoin_kwh`` forment la prévision du cycle : ce que
+    le calcul a compté de temps et d'énergie pour la chauffe. Un
+    consommateur peut les rapprocher de la chauffe réellement mesurée.
     """
     r = calcul.dernier_resultat()
     heure = str(r.get("heure") or "").strip()
@@ -85,9 +89,17 @@ def creneau_retenu():
         duree = int(r.get("duree_min") or 60)
     except (TypeError, ValueError):
         duree = 60
+    # L'énergie comptée par le calcul, et non le réglage du moment : c'est
+    # elle qui a servi à décider. Sans calcul (heure saisie à la main), le
+    # réglage est la seule prévision qui existe.
+    try:
+        besoin = float(r.get("besoin_kwh"))
+    except (TypeError, ValueError):
+        besoin = api.conso_chauffe_eau()
     return {
         "heure": heure,
         "duree_min": duree,
+        "besoin_kwh": besoin,
         "mode": r.get("mode") or "",
         "forcee": bool(r.get("heure_forcee")),
         "perime": bool(r.get("perime")),
@@ -134,7 +146,7 @@ def plan_machines():
 
 INFOS = [
     {"nom": "creneau_retenu", "type": "objet",
-     "description": "Créneau de chauffe retenu (heure, durée, mode)"},
+     "description": "Créneau de chauffe retenu (heure, durée, énergie, mode)"},
     {"nom": "heure_demarrage", "description": "Heure conseillée de démarrage (HH:MM)"},
     {"nom": "mode_retenu", "description": "Mode retenu (solaire/nuit)"},
     {"nom": "duree_chauffe_min", "description": "Durée de chauffe retenue (min)"},

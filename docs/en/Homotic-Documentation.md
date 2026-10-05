@@ -379,6 +379,16 @@ Equipment modules: they expose their state as **infos** and their commands as **
 
 The Atlantic water heater has no direct "heat" command: forcing a full heating cycle amounts to setting the **number of desired showers to the maximum**, and returning to normal operation to setting it back to the minimum. That is what the `chauffer` and `eteindre` functions do.
 
+### Heating log: forecast versus actual
+
+While it heats, the tank is read every minute (temperatures, heating element power). Each heating cycle becomes a row in the **Suivi des chauffes** card of the tab: duration, energy consumed, degrees gained.
+
+When a cycle starts around the planned time (from ten minutes before to twenty minutes after), the log also freezes **what the forecast announced for it**: the duration and the energy the start-time calculation had counted for the cycle. Once the cycle is over, its row shows the forecast (*Prévu*), the measured energy and the gap (*Écart* = measured − forecast; positive means the cycle needed **more** than forecast). The same comparison is written to the Journal at the end of every cycle.
+
+The **Prévu contre réel** block averages the last twenty compared cycles and, from three onwards, gives a verdict: forecast **accurate** (average gap within ± 10 %), **too high** or **too low**. The *average* gap is what counts: a single cycle always deviates, depending on how much hot water was drawn the day before; an error in the same direction cycle after cycle points to a setting to revise — `conso_chauffe_eau` for the energy, `temp_chauffe_ete` and `temp_chauffe_hiver` for the duration, in the Start time tab.
+
+A row stays at "—" when the cycle started outside the planned time (an evening boost, the tank restarting on its own), when it predates this comparison, or when the **Prévision de la chauffe** need is not connected under Configuration → Liaisons.
+
 # Creating a module
 
 A module is a directory under `modules/`. The framework knows nothing about its contents: it reads its `conf.py` and calls the entry points the module declares. Adding a capability to the application therefore requires **no change to the framework**.

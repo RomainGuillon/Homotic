@@ -435,3 +435,49 @@ reprendre pour une absence à venir. En condition de scénario, utiliser
 > Si le ballon reste malgré tout sur « off » après une programmation, le
 > Journal le signale et le réglage *Absence — valeur du mode* permet de
 > forcer `on` au lieu de `prog`.
+
+### Suivi des chauffes : prévu contre réel
+
+Pendant qu'il chauffe, le ballon est relevé chaque minute : températures,
+puissance de la résistance. Chaque chauffe donne une ligne dans la carte
+**Suivi des chauffes** de l'onglet — durée, énergie consommée, degrés
+gagnés.
+
+Quand une chauffe démarre autour de l'heure prévue (par défaut, de dix
+minutes avant à vingt minutes après), le suivi fige en plus **ce que la
+prévision annonçait pour elle** : la durée et l'énergie que le calcul de
+l'heure de démarrage avait comptées pour le cycle. La chauffe terminée, sa
+ligne montre les deux :
+
+| Colonne | Lecture |
+| --- | --- |
+| Énergie | ce que la résistance a réellement consommé, intégré minute par minute |
+| Prévu | ce que le calcul avait compté pour le cycle |
+| Écart | mesuré − prévu. Positif : la chauffe a demandé **plus** que prévu |
+
+La prévision est figée au démarrage, pas relue à la fin : un recalcul lancé
+pendant la chauffe en donnerait une autre, et c'est celle qui a décidé de
+l'heure qu'on veut juger. La même comparaison est écrite dans le Journal à
+chaque fin de chauffe.
+
+Le bloc **Prévu contre réel** fait la moyenne des vingt dernières chauffes
+comparées et, à partir de trois, rend un verdict : prévision **juste**
+(écart moyen dans ± 10 %), **trop haute** ou **trop basse**. C'est l'écart
+*moyen* qui juge. Une chauffe isolée s'écarte toujours, selon l'eau tirée la
+veille ; une erreur dans le même sens chauffe après chauffe désigne un
+réglage à reprendre — `conso_chauffe_eau` pour l'énergie,
+`temp_chauffe_ete` et `temp_chauffe_hiver` pour la durée, dans l'onglet
+Heure de démarrage.
+
+Les deux erreurs ne coûtent pas pareil. Trop basse, le calcul croit le
+ballon couvert par le surplus solaire alors qu'une partie de la chauffe est
+achetée au réseau en heures pleines. Trop haute, il écarte des créneaux qui
+auraient suffi, ou renvoie aux heures creuses une chauffe que le soleil
+pouvait payer.
+
+Une ligne reste à « — » dans trois cas : la chauffe est partie en dehors de
+l'heure prévue (boost demandé le soir, ballon qui se relance seul après une
+douche), elle date d'avant cette comparaison, ou le besoin **Prévision de la
+chauffe** n'est pas branché dans Configuration → Liaisons. Il l'est d'office
+sur `heure_demarrage.creneau_retenu` quand l'heure de chauffe vient déjà de
+ce module.

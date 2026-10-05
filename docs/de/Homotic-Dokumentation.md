@@ -379,6 +379,16 @@ Gerätemodule: Sie stellen ihren Zustand als **Infos** und ihre Befehle als **Sz
 
 Der Atlantic-Warmwasserspeicher kennt keinen direkten Befehl „aufheizen": Eine vollständige Aufheizung zu erzwingen bedeutet, die **Anzahl der gewünschten Duschen auf das Maximum** zu setzen, und zum Normalbetrieb zurückzukehren bedeutet, sie auf das Minimum zurückzustellen. Genau das tun die Funktionen `chauffer` und `eteindre`.
 
+### Aufheizprotokoll: Prognose und Messung
+
+Während des Aufheizens wird der Speicher jede Minute abgelesen (Temperaturen, Leistung des Heizstabs). Jede Aufheizung ergibt eine Zeile in der Karte **Suivi des chauffes** des Reiters: Dauer, verbrauchte Energie, gewonnene Grad.
+
+Beginnt eine Aufheizung rund um die geplante Uhrzeit (von zehn Minuten davor bis zwanzig Minuten danach), hält das Protokoll zusätzlich fest, **was die Prognose für sie angekündigt hatte**: die Dauer und die Energie, mit denen die Startzeitberechnung den Zyklus angesetzt hatte. Nach dem Ende zeigt die Zeile die Prognose (*Prévu*), die gemessene Energie und die Abweichung (*Écart* = gemessen − prognostiziert; positiv heißt, die Aufheizung hat **mehr** gebraucht als prognostiziert). Derselbe Vergleich wird am Ende jeder Aufheizung ins Journal geschrieben.
+
+Der Block **Prévu contre réel** mittelt die letzten zwanzig verglichenen Aufheizungen und fällt ab drei ein Urteil: Prognose **zutreffend** (mittlere Abweichung innerhalb von ± 10 %), **zu hoch** oder **zu niedrig**. Entscheidend ist die *mittlere* Abweichung: Eine einzelne Aufheizung weicht immer ab, je nachdem, wie viel Warmwasser am Vortag entnommen wurde; ein Fehler in dieselbe Richtung, Aufheizung für Aufheizung, weist auf eine Einstellung hin, die anzupassen ist — `conso_chauffe_eau` für die Energie, `temp_chauffe_ete` und `temp_chauffe_hiver` für die Dauer, im Reiter Startzeit.
+
+Eine Zeile bleibt bei „—", wenn die Aufheizung außerhalb der geplanten Uhrzeit begonnen hat (ein Boost am Abend, ein selbstständiges Nachheizen des Speichers), wenn sie älter ist als dieser Vergleich oder wenn der Bedarf **Prévision de la chauffe** unter Configuration → Liaisons nicht verbunden ist.
+
 # Ein Modul erstellen
 
 Ein Modul ist ein Verzeichnis unter `modules/`. Der Unterbau kennt dessen Inhalt nicht: Er liest die `conf.py` und ruft die vom Modul deklarierten Einstiegspunkte auf. Eine Fähigkeit hinzuzufügen erfordert daher **keine Änderung am Unterbau**.

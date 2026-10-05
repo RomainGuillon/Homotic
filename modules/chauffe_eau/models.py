@@ -35,6 +35,16 @@ class ChauffeSession(models.Model):
     energie_elec_wh = models.FloatField("dont résistance (Wh)", default=0.0)
     duree_min = models.IntegerField("durée (min)", default=0)
 
+    # Ce que la prévision annonçait pour cette chauffe, figé à son
+    # démarrage : la prévision peut être refaite dans la journée, et c'est
+    # celle qui a lancé la chauffe qu'on veut juger. Vides pour une chauffe
+    # partie en dehors de l'heure prévue (lancée à la main, relance du
+    # ballon) : il n'y avait alors rien à quoi la comparer.
+    prevu_heure = models.CharField("heure prévue (HH:MM)", max_length=5,
+                                   blank=True, default="")
+    prevu_duree_min = models.IntegerField("durée prévue (min)", null=True, blank=True)
+    prevu_wh = models.FloatField("énergie prévue (Wh)", null=True, blank=True)
+
     class Meta:
         verbose_name = "chauffe du ballon"
         verbose_name_plural = "chauffes du ballon"
@@ -57,6 +67,42 @@ class ChauffeSession(models.Model):
         if not delta or delta <= 0 or not self.energie_wh:
             return None
         return round(self.energie_wh / delta)
+
+    # --- Prévu contre réel -------------------------------------------
+    # Tous les écarts se lisent « réel − prévu » : positif, la chauffe a
+    # demandé plus que prévu (prévision trop basse) ; négatif, moins.
+
+    @property
+    def comparable(self):
+        """Vrai si la chauffe est terminée, mesurée, et avait une prévision.
+
+        Une énergie nulle n'est pas une chauffe gratuite mais une chauffe
+        dont la puissance n'a pas été relevée : la comparer afficherait un
+        écart de −100 % qui ne dirait rien de la prévision.
+        """
+        return bool(self.fin and self.prevu_wh and self.energie_wh)
+
+    @property
+    def ecart_wh(self):
+        """Énergie consommée en plus (+) ou en moins (−) du prévu, en Wh."""
+        if not self.comparable:
+            return None
+        return round(self.energie_wh - self.prevu_wh, 1)
+
+    @property
+    def ecart_pct(self):
+        """Le même écart, en pourcentage de l'énergie prévue."""
+        ecart = self.ecart_wh
+        if ecart is None:
+            return None
+        return round(100 * ecart / self.prevu_wh)
+
+    @property
+    def ecart_duree_min(self):
+        """Minutes de chauffe en plus (+) ou en moins (−) du prévu."""
+        if not self.fin or not self.prevu_duree_min:
+            return None
+        return self.duree_min - self.prevu_duree_min
 
 
 class ChauffeMesure(models.Model):

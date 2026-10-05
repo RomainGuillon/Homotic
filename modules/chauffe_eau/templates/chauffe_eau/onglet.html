@@ -471,19 +471,113 @@
             </p>
           {% endif %}
 
+          {# --- Prévu contre réel : la prévision était-elle bonne ? --- #}
+          {% with b=suivi.bilan %}
+            <div class="border rounded p-3 mb-3">
+              <div class="fw-bold mb-2"><i class="bi bi-bullseye me-2"></i>Prévu contre réel</div>
+              {% if b.nombre %}
+                <div class="row text-center g-2 mb-2">
+                  <div class="col-6 col-md-3">
+                    <div class="fs-5 fw-bold">{{ b.prevu_kwh|floatformat:2 }} kWh</div>
+                    <div class="small text-secondary">prévu par chauffe</div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="fs-5 fw-bold">{{ b.reel_kwh|floatformat:2 }} kWh</div>
+                    <div class="small text-secondary">
+                      mesuré en moyenne
+                      {% if b.nombre > 1 %}
+                        <br><span class="text-faint">de {{ b.reel_min_kwh|floatformat:2 }}
+                          à {{ b.reel_max_kwh|floatformat:2 }} kWh</span>
+                      {% endif %}
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="fs-5 fw-bold {% if b.verdict == 'juste' %}text-success{% elif b.verdict %}text-warning{% endif %}">
+                      {% if b.ecart_kwh > 0 %}+{% endif %}{{ b.ecart_kwh|floatformat:2 }} kWh</div>
+                    <div class="small text-secondary">
+                      écart moyen ({% if b.ecart_pct > 0 %}+{% endif %}{{ b.ecart_pct }}&nbsp;%)
+                      <br><span class="text-faint">chaque chauffe :
+                        ±&nbsp;{{ b.ecart_absolu_kwh|floatformat:2 }}&nbsp;kWh</span>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="fs-5 fw-bold">
+                      {% if b.duree_reelle_min %}{{ b.duree_reelle_min }} min{% else %}—{% endif %}</div>
+                    <div class="small text-secondary">
+                      durée mesurée
+                      {% if b.duree_prevue_min %}
+                        <br><span class="text-faint">prévue {{ b.duree_prevue_min }} min
+                          ({% if b.ecart_duree_min > 0 %}+{% endif %}{{ b.ecart_duree_min }})</span>
+                      {% endif %}
+                    </div>
+                  </div>
+                </div>
+                <p class="small mb-0">
+                  {% if b.verdict == "juste" %}
+                    <i class="bi bi-check-circle text-success me-1"></i>La prévision est
+                    <strong>juste</strong> : sur {{ b.nombre }} chauffes, l'écart moyen
+                    reste dans ± {{ b.tolerance_pct }} %.
+                  {% elif b.verdict == "trop_haute" %}
+                    <i class="bi bi-arrow-down-circle text-warning me-1"></i>La prévision est
+                    <strong>trop haute</strong> : sur {{ b.nombre }} chauffes, le ballon a
+                    consommé {{ b.reel_kwh|floatformat:2 }} kWh en moyenne pour
+                    {{ b.prevu_kwh|floatformat:2 }} kWh prévus.
+                  {% elif b.verdict == "trop_basse" %}
+                    <i class="bi bi-arrow-up-circle text-warning me-1"></i>La prévision est
+                    <strong>trop basse</strong> : sur {{ b.nombre }} chauffes, le ballon a
+                    consommé {{ b.reel_kwh|floatformat:2 }} kWh en moyenne pour
+                    {{ b.prevu_kwh|floatformat:2 }} kWh prévus.
+                  {% else %}
+                    <span class="text-secondary">{{ b.nombre }} chauffe{{ b.nombre|pluralize }}
+                      comparée{{ b.nombre|pluralize }} : il en faut {{ b.minimum }} pour
+                      juger la prévision.</span>
+                  {% endif %}
+                  {% if b.verdict and b.verdict != "juste" %}
+                    La valeur prévue se corrige
+                    {% if suivi.fournisseur_prevision %}dans l'onglet
+                      <strong>{{ suivi.fournisseur_prevision }}</strong>{% else %}dans le
+                      module qui la fournit{% endif %}.
+                  {% endif %}
+                </p>
+              {% elif suivi.fournisseur_prevision %}
+                <p class="text-secondary small mb-0">Aucune chauffe comparée pour l'instant.
+                  La prévision est figée au démarrage de chaque chauffe qui part à l'heure
+                  prévue : la première comparaison arrivera avec la prochaine.</p>
+              {% else %}
+                <p class="text-secondary small mb-0">Le besoin « Prévision de la chauffe »
+                  n'est pas branché : les chauffes sont mesurées, mais sans rien à quoi les
+                  comparer. Branchement dans Configuration → Liaisons.</p>
+              {% endif %}
+            </div>
+          {% endwith %}
+
           {% if suivi.dernieres %}
-            <table class="table table-sm align-middle mb-0">
+            {# Sept colonnes : sur un écran étroit le tableau défile, il ne se replie pas. #}
+            <div class="table-responsive">
+            <table class="table table-sm align-middle text-nowrap mb-0">
               <thead>
                 <tr>
                   <th>Chauffe</th><th>Durée</th><th>Températures</th>
-                  <th class="text-end">Énergie</th><th class="text-end">Wh/°C</th>
+                  <th class="text-end">Énergie</th><th class="text-end">Prévu</th>
+                  <th class="text-end">Écart</th><th class="text-end">Wh/°C</th>
                 </tr>
               </thead>
               <tbody>
                 {% for s in suivi.dernieres %}
                   <tr>
-                    <td>{{ s.debut|date:"d/m H:i" }}</td>
-                    <td>{{ s.duree_min }} min</td>
+                    <td>
+                      {{ s.debut|date:"d/m H:i" }}
+                      {% if s.prevu_heure %}
+                        <br><span class="small text-secondary">prévue {{ s.prevu_heure }}</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {{ s.duree_min }} min
+                      {% if s.ecart_duree_min != None %}
+                        <br><span class="small text-secondary">prévu {{ s.prevu_duree_min }}
+                          ({% if s.ecart_duree_min > 0 %}+{% endif %}{{ s.ecart_duree_min }})</span>
+                      {% endif %}
+                    </td>
                     <td class="small">
                       {{ s.temp_debut }} → {{ s.temp_fin }} °C
                       {% if s.delta_temp %}<span class="text-secondary">({{ s.delta_temp }} °C)</span>{% endif %}
@@ -494,11 +588,25 @@
                         <br><span class="small text-warning">dont PAC {{ s.energie_pac_wh|floatformat:0 }}</span>
                       {% endif %}
                     </td>
+                    <td class="text-end">
+                      {% if s.prevu_wh %}{{ s.prevu_wh|floatformat:0 }} Wh{% else %}—{% endif %}
+                    </td>
+                    <td class="text-end">
+                      {% if s.ecart_wh != None %}
+                        <strong class="{% if s.ecart_juste %}text-success{% else %}text-warning{% endif %}">
+                          {% if s.ecart_wh > 0 %}+{% endif %}{{ s.ecart_wh|floatformat:0 }} Wh</strong>
+                        <br><span class="small text-secondary">{% if s.ecart_pct > 0 %}+{% endif %}{{ s.ecart_pct }} %</span>
+                      {% else %}—{% endif %}
+                    </td>
                     <td class="text-end">{% if s.wh_par_degre %}{{ s.wh_par_degre }}{% else %}—{% endif %}</td>
                   </tr>
                 {% endfor %}
               </tbody>
             </table>
+            </div>
+            <p class="small text-secondary mt-2 mb-0">Écart = mesuré − prévu : positif, la
+              chauffe a demandé plus que prévu. « — » : chauffe partie en dehors de l'heure
+              prévue (lancée à la main, relance du ballon), ou antérieure à la comparaison.</p>
           {% else %}
             <p class="text-secondary mb-0">Aucune chauffe enregistrée pour le moment.
               La première sera captée dès que le ballon se mettra à chauffer.</p>

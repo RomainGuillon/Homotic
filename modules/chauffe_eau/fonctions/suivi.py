@@ -33,6 +33,12 @@ Réglages (module « chauffe_eau ») :
 - ``suivi_fenetre_avant``    : minutes de guet avant l'heure prévue (défaut 10)
 - ``suivi_fenetre_apres``    : minutes de guet après l'heure prévue (défaut 20)
 - ``suivi_jours_conserves``  : purge des relevés au-delà (défaut 60 jours)
+
+Prévu contre réel : une chauffe qui démarre autour de l'heure prévue est
+enregistrée avec ce que la prévision annonçait pour elle (durée, énergie),
+lu par le besoin ``prevision_chauffe``. À la clôture, l'écart entre les
+deux dit si la prévision était bonne ; ``bilan_prevision`` en fait la
+moyenne sur les dernières chauffes, pour savoir dans quel sens la corriger.
 """
 
 from datetime import datetime, timedelta
@@ -45,6 +51,14 @@ from core.services import get_setting, journal
 from . import api
 
 MODULE = "chauffe_eau"
+
+# Bilan de la prévision : on juge sur les chauffes récentes (la saison
+# déplace la consommation, une moyenne sur l'année ne dirait rien du mois
+# en cours), et pas avant d'en avoir quelques-unes.
+BILAN_CHAUFFES_MAX = 20
+BILAN_CHAUFFES_MIN = 3
+# Écart moyen en dessous duquel la prévision est tenue pour juste (%).
+BILAN_TOLERANCE_PCT = 10
 
 
 def _reglage_int(cle, defaut):
@@ -69,18 +83,59 @@ def dans_fenetre_de_guet(maintenant=None):
     from core.liaisons import lire_besoin
 
     heure, _err = lire_besoin(MODULE, "heure_chauffe_prevue")
-    texte = str(heure or "").strip()
-    parts = texte.split(":")
+    return _autour_de(heure, maintenant or timezone.localtime())
+
+
+def _autour_de(heure, maintenant):
+    """Vrai si ``maintenant`` tombe dans la fenêtre de guet de ``HH:MM``."""
+    parts = str(heure or "").strip().split(":")
     if len(parts) != 2 or not all(p.isdigit() for p in parts):
         return False
-
-    maintenant = maintenant or timezone.localtime()
-    prevue = maintenant.replace(
-        hour=int(parts[0]), minute=int(parts[1]), second=0, microsecond=0
-    )
+    try:
+        prevue = maintenant.replace(
+            hour=int(parts[0]), minute=int(parts[1]), second=0, microsecond=0
+        )
+    except ValueError:  # « 25:70 » : pas une heure
+        return False
     debut = prevue - timedelta(minutes=_reglage_int("suivi_fenetre_avant", 10))
     fin = prevue + timedelta(minutes=_reglage_int("suivi_fenetre_apres", 20))
     return debut <= maintenant <= fin
+
+
+def prevision_de_la_chauffe(maintenant=None):
+    """Ce que la prévision annonçait pour une chauffe qui démarre maintenant.
+
+    Retourne les champs ``prevu_*`` à poser sur la ``ChauffeSession``, ou
+    ``{}`` s'il n'y a rien à comparer : besoin non branché, calcul jamais
+    lancé, ou chauffe partie en dehors de la fenêtre de l'heure prévue. Ce
+    dernier cas est le plus fréquent — un boost demandé le soir, le ballon
+    qui se relance seul après une douche : ces chauffes-là n'ont jamais été
+    prévues, les rapprocher de la prévision du jour la ferait passer pour
+    fausse.
+
+    Ne lève jamais : une prévision illisible ne doit pas coûter
+    l'enregistrement de la chauffe.
+    """
+    from core.liaisons import lire_besoin
+
+    try:
+        prevision, _err = lire_besoin(MODULE, "prevision_chauffe")
+        if not isinstance(prevision, dict):
+            return {}
+        heure = str(prevision.get("heure") or "").strip()
+        if not _autour_de(heure, maintenant or timezone.localtime()):
+            return {}
+
+        champs = {"prevu_heure": heure[:5]}
+        kwh = _valeur(prevision, "besoin_kwh")
+        if kwh and kwh > 0:
+            champs["prevu_wh"] = round(kwh * 1000, 1)
+        duree = _valeur(prevision, "duree_min")
+        if duree and duree > 0:
+            champs["prevu_duree_min"] = int(round(duree))
+        return champs
+    except Exception:
+        return {}
 
 
 def _valeur(data, *cles):
@@ -157,14 +212,23 @@ def tache_suivi():
     maintenant = timezone.now()
 
     if chauffe and session is None:
+        # La prévision est figée ici, et pas relue à la clôture : un
+        # recalcul lancé pendant la chauffe en donnerait une autre.
+        prevu = prevision_de_la_chauffe(timezone.localtime(maintenant))
         session = ChauffeSession.objects.create(
             debut=maintenant,
             temp_debut=mesures["temp_milieu"],
             consigne=mesures["consigne"],
+            **prevu,
         )
+        annonce = ""
+        if prevu.get("prevu_wh"):
+            annonce = f" — prévu {prevu['prevu_wh']:.0f} Wh"
+            if prevu.get("prevu_duree_min"):
+                annonce += f" en {prevu['prevu_duree_min']} min"
         journal(
             f"Début de chauffe enregistré — départ à {mesures['temp_milieu']} °C, "
-            f"consigne {mesures['consigne']} °C",
+            f"consigne {mesures['consigne']} °C{annonce}",
             module=MODULE,
         )
 
@@ -203,6 +267,16 @@ def _cloturer(session, mesures, maintenant):
     detail = ""
     if session.wh_par_degre:
         detail = f" — {session.delta_temp} °C gagnés, {session.wh_par_degre} Wh/°C"
+    if session.ecart_wh is not None:
+        detail += (
+            f" — prévu {session.prevu_wh:.0f} Wh : écart {session.ecart_wh:+.0f} Wh "
+            f"({session.ecart_pct:+d} %)"
+        )
+        if session.ecart_duree_min is not None:
+            detail += (
+                f", durée prévue {session.prevu_duree_min} min "
+                f"({session.ecart_duree_min:+d} min)"
+            )
     journal(
         f"Fin de chauffe : {session.duree_min} min, "
         f"{session.energie_wh:.0f} Wh (PAC {session.energie_pac_wh:.0f} / "
@@ -256,6 +330,91 @@ def wh_par_degre_theorique():
     return round(litres * 1.163), round(litres)
 
 
+def _moyenne(valeurs):
+    return sum(valeurs) / len(valeurs)
+
+
+def bilan_prevision():
+    """La prévision était-elle bonne ? Moyennes sur les dernières chauffes.
+
+    Ne compte que les chauffes comparables (terminées, mesurées, parties à
+    l'heure prévue), les ``BILAN_CHAUFFES_MAX`` plus récentes. Énergies en
+    kWh, parce que c'est l'unité dans laquelle une prévision se règle.
+
+    ``verdict`` : ``"juste"`` si l'écart moyen tient dans la tolérance,
+    ``"trop_haute"`` si le ballon consomme moins que prévu, ``"trop_basse"``
+    s'il consomme plus — et ``None`` tant qu'il n'y a pas assez de chauffes
+    pour le dire. C'est l'écart **moyen** qui juge : une chauffe isolée
+    s'écarte toujours, selon l'eau tirée la veille ; c'est une erreur dans
+    le même sens, chauffe après chauffe, qui signale un réglage à revoir.
+    """
+    from ..models import ChauffeSession
+
+    comparees = list(
+        ChauffeSession.objects.filter(
+            fin__isnull=False, prevu_wh__gt=0, energie_wh__gt=0
+        )[:BILAN_CHAUFFES_MAX]
+    )
+    bilan = {
+        "nombre": len(comparees),
+        "minimum": BILAN_CHAUFFES_MIN,
+        "tolerance_pct": BILAN_TOLERANCE_PCT,
+        "verdict": None,
+    }
+    if not comparees:
+        return bilan
+
+    prevu = _moyenne([s.prevu_wh for s in comparees])
+    reel = _moyenne([s.energie_wh for s in comparees])
+    bilan.update({
+        "prevu_kwh": round(prevu / 1000, 2),
+        "reel_kwh": round(reel / 1000, 2),
+        "reel_min_kwh": round(min(s.energie_wh for s in comparees) / 1000, 2),
+        "reel_max_kwh": round(max(s.energie_wh for s in comparees) / 1000, 2),
+        # Écart moyen signé : le biais de la prévision.
+        "ecart_kwh": round((reel - prevu) / 1000, 2),
+        "ecart_pct": round(100 * (reel - prevu) / prevu),
+        # Écart moyen sans le signe : de combien une chauffe s'éloigne du
+        # prévu, dans un sens ou dans l'autre.
+        "ecart_absolu_kwh": round(
+            _moyenne([abs(s.ecart_wh) for s in comparees]) / 1000, 2
+        ),
+    })
+
+    durees = [s for s in comparees if s.prevu_duree_min]
+    if durees:
+        duree_prevue = _moyenne([s.prevu_duree_min for s in durees])
+        duree_reelle = _moyenne([s.duree_min for s in durees])
+        bilan.update({
+            "duree_prevue_min": round(duree_prevue),
+            "duree_reelle_min": round(duree_reelle),
+            "ecart_duree_min": round(duree_reelle - duree_prevue),
+        })
+
+    if len(comparees) >= BILAN_CHAUFFES_MIN:
+        if abs(bilan["ecart_pct"]) <= BILAN_TOLERANCE_PCT:
+            bilan["verdict"] = "juste"
+        else:
+            bilan["verdict"] = "trop_haute" if reel < prevu else "trop_basse"
+    return bilan
+
+
+def _fournisseur_prevision():
+    """Libellé du module branché sur ``prevision_chauffe``, ou ``""``.
+
+    Sert seulement à dire où corriger la prévision : ce module ne sait pas
+    qui la calcule, il lit le branchement fait dans Configuration.
+    """
+    from core.liaisons import liaison
+    from core.models import Module
+
+    nom = liaison(MODULE, "prevision_chauffe").partition(".")[0]
+    if not nom:
+        return ""
+    module = Module.objects.filter(name=nom).first()
+    return module.label if module else nom
+
+
 def resume():
     """Synthèse du suivi, pour l'onglet : avancement et premier modèle."""
     from ..models import ChauffeMesure, ChauffeSession
@@ -273,6 +432,13 @@ def resume():
     ]
     theorique, litres = wh_par_degre_theorique()
 
+    dernieres = list(ChauffeSession.objects.filter(fin__isnull=False)[:10])
+    for s in dernieres:
+        # Pour la couleur de la ligne : même tolérance que le bilan.
+        s.ecart_juste = (
+            s.ecart_pct is not None and abs(s.ecart_pct) <= BILAN_TOLERANCE_PCT
+        )
+
     return {
         "actif": actif(),
         "sessions": total,
@@ -283,5 +449,7 @@ def resume():
         "wh_par_degre_theorique": theorique,
         "litres": litres,
         "minutes_par_degre": round(sum(minutes_deg) / len(minutes_deg), 1) if minutes_deg else None,
-        "dernieres": list(ChauffeSession.objects.filter(fin__isnull=False)[:10]),
+        "dernieres": dernieres,
+        "bilan": bilan_prevision(),
+        "fournisseur_prevision": _fournisseur_prevision(),
     }

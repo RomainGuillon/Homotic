@@ -25,6 +25,10 @@ TACHES = [
 # passer à la relève à la minute. Il ne calcule pas cette heure et ne sait
 # pas qui la calcule : branchement dans Configuration → Liaisons
 # (voir docs/09-liaisons-entre-modules.md).
+#
+# Second besoin, pour juger la prévision après coup : ce que le calcul
+# annonçait pour la chauffe (durée, énergie). Le suivi le fige au démarrage
+# et le rapproche de ce qu'il a mesuré — voir fonctions/suivi.py.
 BESOINS = [
     {
         "nom": "heure_chauffe_prevue",
@@ -32,6 +36,13 @@ BESOINS = [
         "type": "valeur",
         "obligatoire": False,
         "sans": "pas de fenêtre de surveillance : le suivi reste en veille espacée",
+    },
+    {
+        "nom": "prevision_chauffe",
+        "libelle": "Prévision de la chauffe (heure, durée, énergie)",
+        "type": "objet",
+        "obligatoire": False,
+        "sans": "pas de comparaison entre le prévu et le réel dans le suivi des chauffes",
     },
 ]
 

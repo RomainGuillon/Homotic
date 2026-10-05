@@ -143,9 +143,16 @@ Liaisons — Heure de démarrage
 | `solcast` | `production_reelle` | `serie` kW | `enphase.production_reelle` | Superposer le réalisé au prévu |
 | `solcast` | `creneau_chauffe` | `objet` | `heure_demarrage.creneau_retenu` | Surligner le créneau sur la courbe du jour |
 | `chauffe_eau` | `heure_chauffe_prevue` | `valeur` | `heure_demarrage.heure_demarrage` | Passer à la relève à la minute autour de la chauffe attendue |
+| `chauffe_eau` | `prevision_chauffe` | `objet` | `heure_demarrage.creneau_retenu` | Comparer chaque chauffe mesurée à ce qui était prévu (durée, énergie) |
 
 Le cycle disparaît : plus aucun module n'en importe un autre, tout passe par
 le socle.
+
+Le dernier, `prevision_chauffe`, n'a jamais été un import : il est né
+directement sous forme de besoin. Il réutilise un objet déjà publié —
+`creneau_retenu`, qui surligne aussi la courbe solaire — en lui ajoutant une
+clé, `besoin_kwh`. Ajouter une clé à un objet publié ne casse aucun
+consommateur ; en renommer ou en retirer une, si.
 
 ### Forme des objets échangés
 
@@ -160,7 +167,10 @@ mieux qu'un import.
  "hc_debut": "22:00", "hc_fin": "06:00"}
 
 # creneau_retenu — l'heure effectivement retenue, forçage manuel compris.
-{"heure": "13:30", "duree_min": 60, "mode": "solaire", "forcee": False}
+# duree_min et besoin_kwh sont la prévision du cycle : le temps et l'énergie
+# que le calcul a comptés pour la chauffe.
+{"heure": "13:30", "duree_min": 60, "besoin_kwh": 2.5, "mode": "solaire",
+ "forcee": False, "perime": False}
 ```
 
 Un fournisseur qui ne peut pas répondre renvoie `None` (Tempo sans couleur
