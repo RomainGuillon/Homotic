@@ -405,6 +405,8 @@ Der Block **Prochaine chauffe, d'après la température du ballon** zeigt, was d
 
 Was die Schätzung nicht weiß: Sie geht von der Temperatur **zum Zeitpunkt der Berechnung** aus. Wird zwischen Berechnung und Aufheizung Wasser entnommen, startet der Speicher kälter; der Block *Prévu contre réel* zeigt das als regelmäßig zu niedrige Prognose.
 
+**Zwischen Berechnung und Aufheizung.** Um zu erfahren, ob diese Abweichung ins Gewicht fällt, **misst** die Aufzeichnung sie. Zusammen mit der Prognose behält jede zur geplanten Uhrzeit gestartete Aufheizung die Speichertemperatur zum Zeitpunkt der Berechnung und die Uhrzeit dieser Berechnung. Der Block **Entre le calcul et la chauffe** mittelt die letzten zwanzig: die mittlere Abweichung beim Start (Starttemperatur − Temperatur zum Zeitpunkt der Berechnung; negativ heißt, der Speicher ist kälter gestartet, als die Prognose annahm), die mittlere Zeitspanne zwischen Berechnung und Start sowie dieselbe Abweichung, mit der Steigung der Geraden in Heizminuten umgerechnet. Eine mehr als zwanzig Stunden alte Prognose bleibt außen vor. **Vorerst wird nichts korrigiert**: Der Block misst und verändert die Schätzung nicht; ab zehn Aufheizungen meldet er, dass genug Messungen für eine Entscheidung vorliegen. Erweist sich die Abweichung als regelmäßig, kann man die letzte Neuberechnung näher an die Aufheizung legen oder die Abweichung vor der Schätzung von der Temperatur abziehen.
+
 # Ein Modul erstellen
 
 Ein Modul ist ein Verzeichnis unter `modules/`. Der Unterbau kennt dessen Inhalt nicht: Er liest die `conf.py` und ruft die vom Modul deklarierten Einstiegspunkte auf. Eine Fähigkeit hinzuzufügen erfordert daher **keine Änderung am Unterbau**.

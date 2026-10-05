@@ -62,6 +62,17 @@ class ChauffeSession(models.Model):
                                    blank=True, default="")
     prevu_duree_min = models.IntegerField("durée prévue (min)", null=True, blank=True)
     prevu_wh = models.FloatField("énergie prévue (Wh)", null=True, blank=True)
+    # La prévision est faite d'après la température du ballon au moment du
+    # calcul — parfois plusieurs heures avant la chauffe. Si de l'eau est
+    # tirée entre-temps, le ballon part plus froid et la chauffe dure plus
+    # longtemps que prévu. On garde donc la température qui a servi et
+    # l'heure du calcul : rapprochées de ``temp_debut`` et de ``debut``,
+    # elles disent de combien le ballon bouge entre les deux, et en combien
+    # de temps. Vides quand la prévision ne vient pas d'une estimation.
+    prevu_temp = models.FloatField(
+        "température au moment de la prévision (°C)", null=True, blank=True)
+    prevu_calcule_a = models.DateTimeField(
+        "prévision calculée à", null=True, blank=True)
 
     class Meta:
         verbose_name = "chauffe du ballon"
@@ -106,6 +117,26 @@ class ChauffeSession(models.Model):
         if not delta or delta <= 0 or not self.energie_wh:
             return None
         return round(self.energie_wh / delta)
+
+    # --- Entre le calcul et la chauffe -------------------------------
+
+    @property
+    def baisse_avant_chauffe(self):
+        """Degrés perdus entre la prévision et le départ, ou None.
+
+        Positif : le ballon est parti plus froid qu'il n'était au moment du
+        calcul (eau tirée, refroidissement). Négatif : plus chaud.
+        """
+        if self.prevu_temp is None or self.temp_debut is None:
+            return None
+        return round(self.prevu_temp - self.temp_debut, 1)
+
+    @property
+    def delai_avant_chauffe_min(self):
+        """Minutes écoulées entre le calcul de la prévision et le départ."""
+        if not self.prevu_calcule_a or not self.debut:
+            return None
+        return round((self.debut - self.prevu_calcule_a).total_seconds() / 60)
 
     # --- Prévu contre réel -------------------------------------------
     # Tous les écarts se lisent « réel − prévu » : positif, la chauffe a

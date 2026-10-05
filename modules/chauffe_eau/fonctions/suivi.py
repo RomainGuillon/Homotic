@@ -46,6 +46,13 @@ est estimée et l'énergie intégrée jusque-là seulement (``releves.py``).
 C'est aussi là qu'on note si de l'eau a été tirée en cours de chauffe, et
 au démarrage si la chauffe part à l'heure prévue : le modèle de durée
 (``modele.py``) n'apprend que des chauffes planifiées et sans tirage.
+
+Entre le calcul et la chauffe : la prévision repose sur la température du
+ballon au moment du calcul, parfois des heures avant le départ. Avec la
+prévision, on fige donc cette température et l'heure du calcul ;
+``bilan_depart`` dit de combien le ballon a bougé entre les deux. Rien
+n'est corrigé pour l'instant : on mesure d'abord, pour savoir si l'écart
+mérite une correction et laquelle.
 """
 
 from datetime import datetime, timedelta
@@ -66,6 +73,15 @@ BILAN_CHAUFFES_MAX = 20
 BILAN_CHAUFFES_MIN = 3
 # Écart moyen en dessous duquel la prévision est tenue pour juste (%).
 BILAN_TOLERANCE_PCT = 10
+
+# Écart de température entre le calcul et le départ : mêmes principes, sur
+# les chauffes récentes, et pas de conclusion avant d'en avoir assez.
+DEPART_CHAUFFES_MAX = 20
+DEPART_CHAUFFES_MIN = 10
+# Au-delà, la prévision date d'un autre jour que la chauffe (calcul non
+# refait) : l'écart ne dirait rien du délai habituel. Vingt heures laissent
+# passer la chauffe de nuit décidée la veille en journée.
+DEPART_DELAI_MAX_MIN = 20 * 60
 
 
 def _reglage_int(cle, defaut):
@@ -140,9 +156,42 @@ def prevision_de_la_chauffe(maintenant=None):
         duree = _valeur(prevision, "duree_min")
         if duree and duree > 0:
             champs["prevu_duree_min"] = int(round(duree))
+        # Sur quoi la prévision reposait : la température du ballon au
+        # moment du calcul, et l'instant de ce calcul.
+        temperature = _valeur(prevision, "temperature")
+        if temperature is not None:
+            champs["prevu_temp"] = round(temperature, 1)
+        calcule_a = _instant(prevision.get("calcule_a"))
+        if calcule_a is not None:
+            champs["prevu_calcule_a"] = calcule_a
         return champs
     except Exception:
         return {}
+
+
+def _instant(texte):
+    """Instant lu dans un texte ISO, ou ``None``.
+
+    Un instant sans fuseau est pris en heure locale du serveur : c'est ainsi
+    que les modules datent leurs calculs.
+    """
+    if not texte:
+        return None
+    try:
+        instant = datetime.fromisoformat(str(texte))
+    except ValueError:
+        return None
+    if timezone.is_naive(instant):
+        instant = timezone.make_aware(instant)
+    return instant
+
+
+def _duree_lisible(minutes):
+    """« 45 min », « 2 h 05 » — pour un délai."""
+    minutes = int(round(minutes))
+    if minutes < 60:
+        return f"{minutes} min"
+    return f"{minutes // 60} h {minutes % 60:02d}"
 
 
 def _valeur(data, *cles):
@@ -238,6 +287,10 @@ def tache_suivi():
             annonce = f" — prévu {prevu['prevu_wh']:.0f} Wh"
             if prevu.get("prevu_duree_min"):
                 annonce += f" en {prevu['prevu_duree_min']} min"
+        if session.baisse_avant_chauffe is not None:
+            annonce += f" — prévision faite avec un ballon à {session.prevu_temp} °C"
+            if session.delai_avant_chauffe_min is not None:
+                annonce += f", {_duree_lisible(session.delai_avant_chauffe_min)} plus tôt"
         journal(
             f"Début de chauffe enregistré — départ à {mesures['temp_milieu']} °C, "
             f"consigne {mesures['consigne']} °C{annonce}",
@@ -411,6 +464,66 @@ def bilan_prevision():
     return bilan
 
 
+def bilan_depart():
+    """De combien le ballon bouge-t-il entre la prévision et la chauffe ?
+
+    La prévision est faite avec la température du ballon au moment du
+    calcul. Si le calcul précède la chauffe de plusieurs heures et que de
+    l'eau est tirée entre-temps, le ballon part plus froid et la chauffe
+    dure plus longtemps que prévu. Ici on le **mesure**, sur les
+    ``DEPART_CHAUFFES_MAX`` dernières chauffes parties à l'heure prévue dont
+    la prévision portait une température.
+
+    Les écarts se lisent « départ − prévision » : négatif, le ballon est
+    parti plus froid qu'au moment du calcul.
+
+    ``minutes`` traduit l'écart moyen en minutes de chauffe, avec la pente
+    du modèle de durée : c'est ce qui dit si l'écart vaut une correction.
+    ``suffisant`` : assez de chauffes pour s'y fier.
+    """
+    from ..models import ChauffeSession
+
+    candidates = ChauffeSession.objects.filter(
+        planifiee=True, prevu_temp__isnull=False, temp_debut__isnull=False,
+        prevu_calcule_a__isnull=False,
+    )[: DEPART_CHAUFFES_MAX * 3]
+    retenues = [
+        s for s in candidates
+        if 0 <= s.delai_avant_chauffe_min <= DEPART_DELAI_MAX_MIN
+    ][:DEPART_CHAUFFES_MAX]
+
+    bilan = {
+        "nombre": len(retenues),
+        "minimum": DEPART_CHAUFFES_MIN,
+        "suffisant": len(retenues) >= DEPART_CHAUFFES_MIN,
+    }
+    if not retenues:
+        return bilan
+
+    ecarts = [-s.baisse_avant_chauffe for s in retenues]
+    delais = [s.delai_avant_chauffe_min for s in retenues]
+    moyen = _moyenne(ecarts)
+    bilan.update({
+        "ecart_moyen": round(moyen, 1),
+        "ecart_min": round(min(ecarts), 1),
+        "ecart_max": round(max(ecarts), 1),
+        "delai_moyen": _duree_lisible(_moyenne(delais)),
+        "delai_min": _duree_lisible(min(delais)),
+        "delai_max": _duree_lisible(max(delais)),
+        "minutes": None,
+    })
+    try:
+        from . import modele
+
+        m = modele.modele()
+        if m["fiable"]:
+            # Pente négative : un ballon plus froid (écart négatif) allonge.
+            bilan["minutes"] = round(m["pente"] * moyen)
+    except Exception:
+        pass  # sans modèle, l'écart reste exprimé en degrés
+    return bilan
+
+
 def _fournisseur_prevision():
     """Libellé du module branché sur ``prevision_chauffe``, ou ``""``.
 
@@ -451,6 +564,8 @@ def resume():
         s.ecart_juste = (
             s.ecart_pct is not None and abs(s.ecart_pct) <= BILAN_TOLERANCE_PCT
         )
+        delai = s.delai_avant_chauffe_min
+        s.delai_lisible = _duree_lisible(delai) if delai is not None and delai >= 0 else ""
 
     return {
         "actif": actif(),
@@ -466,6 +581,7 @@ def resume():
         "bilan": bilan_prevision(),
         "fournisseur_prevision": _fournisseur_prevision(),
         "modele": _modele_pour_l_onglet(),
+        "depart": bilan_depart(),
     }
 
 

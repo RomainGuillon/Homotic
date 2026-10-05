@@ -187,9 +187,13 @@ mieux qu'un import.
 
 # creneau_retenu — l'heure effectivement retenue, forçage manuel compris.
 # duree_min et besoin_kwh sont la prévision du cycle : le temps et l'énergie
-# que le calcul a comptés pour la chauffe.
+# que le calcul a comptés pour la chauffe. temperature et calcule_a disent
+# sur quoi elle repose : la température du ballon annoncée par l'estimation
+# et l'instant du calcul (heure locale). None l'un comme l'autre quand ils
+# sont inconnus — pas d'estimation branchée, heure saisie sans calcul.
 {"heure": "13:30", "duree_min": 60, "besoin_kwh": 2.5, "mode": "solaire",
- "forcee": False, "perime": False}
+ "forcee": False, "perime": False,
+ "temperature": 50.5, "calcule_a": "2026-10-05T11:00:12"}
 
 # estimation_chauffe — ce que demanderait une chauffe qui partirait
 # maintenant. Toujours un objet, même quand il n'y a pas d'estimation :

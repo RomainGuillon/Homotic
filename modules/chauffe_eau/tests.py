@@ -22,7 +22,9 @@ Ce qui est verrouillé ici :
   seraient arrondies à la dizaine supérieure ;
 - le modèle de durée n'apprend que des chauffes planifiées et sans eau
   tirée, et se tait plutôt que de deviner (trop peu de chauffes, ballon
-  hors de la plage connue).
+  hors de la plage connue) ;
+- la température du ballon au moment du calcul est gardée avec la chauffe,
+  pour mesurer de combien il bouge avant le départ — sans rien corriger.
 
 Les tables du module n'existent que s'il est activé dans la base qui a servi
 à lancer les tests : sinon ces tests sont sautés, plutôt que d'échouer sur
@@ -266,6 +268,145 @@ class ClotureDeLaChauffe(TestCase):
                 module="chauffe_eau", message__contains="eau tirée pendant la chauffe"
             ).exists()
         )
+
+
+@skipUnless(MODULE_ACTIF, SANS_MODULE)
+class EntreLeCalculEtLaChauffe(TestCase):
+    """La prévision est faite à une température, la chauffe part à une autre."""
+
+    # Calculée à 11 h avec un ballon à 51,5 °C, pour une chauffe à 13 h 30.
+    AVEC_TEMPERATURE = dict(PREVISION, temperature=51.5,
+                            calcule_a="2026-10-05T11:00:00")
+
+    def test_la_temperature_et_l_heure_du_calcul_sont_gardees(self):
+        with _besoins(self.AVEC_TEMPERATURE):
+            _chauffer_par_paliers(a(13, 30))     # départ réel à 46,9 °C
+
+        s = _session()
+        self.assertEqual(s.prevu_temp, 51.5)
+        self.assertEqual(s.prevu_calcule_a, a(11, 0))
+        self.assertEqual(s.baisse_avant_chauffe, 4.6)
+        self.assertEqual(s.delai_avant_chauffe_min, 150)
+        self.assertTrue(
+            LogEntry.objects.filter(
+                module="chauffe_eau",
+                message__contains="prévision faite avec un ballon à 51.5 °C, 2 h 30 plus tôt",
+            ).exists()
+        )
+
+    def test_un_recalcul_pendant_la_chauffe_ne_change_rien(self):
+        with _besoins(self.AVEC_TEMPERATURE):
+            _releve(a(13, 30), 2400, 46.9)
+        with _besoins(dict(self.AVEC_TEMPERATURE, temperature=60.0,
+                           calcule_a="2026-10-05T13:31:00")):
+            _releve(a(13, 31), 2400, 46.9)
+            _releve(a(13, 32), 0, 47.0)
+        self.assertEqual(_session().prevu_temp, 51.5)
+        self.assertEqual(_session().prevu_calcule_a, a(11, 0))
+
+    def test_prevision_sans_temperature(self):
+        """Durée venue des réglages, ancien fournisseur : rien à garder."""
+        with _besoins():
+            _chauffer_par_paliers(a(13, 30))
+        s = _session()
+        self.assertIsNone(s.prevu_temp)
+        self.assertIsNone(s.prevu_calcule_a)
+        self.assertIsNone(s.baisse_avant_chauffe)
+        self.assertIsNone(s.delai_avant_chauffe_min)
+
+    def test_valeurs_illisibles_la_chauffe_est_enregistree_quand_meme(self):
+        from .models import ChauffeSession
+
+        for champs in ({"temperature": "tiède", "calcule_a": "ce matin"},
+                       {"temperature": None, "calcule_a": ""},
+                       {"temperature": 51.5, "calcule_a": 12}):
+            with self.subTest(champs=champs):
+                ChauffeSession.objects.all().delete()
+                with _besoins(dict(PREVISION, **champs)):
+                    _chauffer_par_paliers(a(13, 30))
+                s = _session()
+                self.assertEqual(s.prevu_wh, 2500.0)
+                self.assertIsNone(s.prevu_calcule_a)
+                self.assertIsNone(s.delai_avant_chauffe_min)
+
+    def test_chauffe_hors_de_l_heure_prevue_rien_n_est_garde(self):
+        with _besoins(self.AVEC_TEMPERATURE):
+            _chauffer_par_paliers(a(19, 0))
+        self.assertIsNone(_session().prevu_temp)
+
+    # --- le bilan ---
+
+    def _mesurees(self, *departs, estimee=52.0, delai_min=150, jour=1, **champs):
+        """Chauffes planifiées, estimées à ``estimee`` °C ``delai_min`` avant."""
+        for i, depart in enumerate(departs):
+            debut = a(13, 30) + timedelta(days=jour + i)
+            _chauffe(jour + i, depart, 200 - 3 * depart, prevu_heure="13:30",
+                     **{"prevu_temp": estimee,
+                        "prevu_calcule_a": debut - timedelta(minutes=delai_min),
+                        **champs})
+
+    def test_aucune_mesure(self):
+        bilan = suivi.bilan_depart()
+        self.assertEqual(bilan["nombre"], 0)
+        self.assertFalse(bilan["suffisant"])
+
+    def test_ecart_moyen_et_delai(self):
+        self._mesurees(50.0, 49.0, 51.0)         # partis 2, 3 et 1 °C plus froids
+        bilan = suivi.bilan_depart()
+        self.assertEqual(bilan["nombre"], 3)
+        self.assertFalse(bilan["suffisant"])
+        self.assertEqual(
+            (bilan["ecart_moyen"], bilan["ecart_min"], bilan["ecart_max"]),
+            (-2.0, -3.0, -1.0),
+        )
+        self.assertEqual(bilan["delai_moyen"], "2 h 30")
+        self.assertIsNone(bilan["minutes"])      # pas encore de modèle fiable
+
+    def test_l_ecart_est_traduit_en_minutes_de_chauffe(self):
+        """2 °C plus froid au départ, à 3 min par degré : 6 min de plus."""
+        self._mesurees(*[45.0 + i for i in range(12)], estimee=None, jour=1)
+        from .models import ChauffeSession
+
+        for s in ChauffeSession.objects.all():   # estimée 2 °C au-dessus du départ
+            s.prevu_temp = s.temp_debut + 2.0
+            s.save()
+        bilan = suivi.bilan_depart()
+        self.assertTrue(bilan["suffisant"])
+        self.assertEqual(bilan["ecart_moyen"], -2.0)
+        self.assertEqual(bilan["minutes"], 6)
+
+    def test_un_ballon_parti_plus_chaud_se_lit_en_positif(self):
+        self._mesurees(53.0, 53.0)
+        self.assertEqual(suivi.bilan_depart()["ecart_moyen"], 1.0)
+
+    def test_une_prevision_d_un_autre_jour_ne_compte_pas(self):
+        """Calcul non refait : 26 h de délai ne disent rien du délai habituel."""
+        self._mesurees(50.0, 50.0)
+        self._mesurees(40.0, delai_min=26 * 60, jour=10)
+        self._mesurees(40.0, delai_min=-30, jour=11)     # calculée après le départ
+        self.assertEqual(suivi.bilan_depart()["nombre"], 2)
+
+    def test_la_chauffe_de_nuit_decidee_la_veille_compte(self):
+        self._mesurees(50.0, delai_min=14 * 60)
+        bilan = suivi.bilan_depart()
+        self.assertEqual((bilan["nombre"], bilan["delai_moyen"]), (1, "14 h 00"))
+
+    def test_seules_les_chauffes_planifiees_comptent(self):
+        self._mesurees(50.0)
+        self._mesurees(30.0, jour=5, planifiee=False)
+        self._mesurees(30.0, jour=6, planifiee=None)
+        self.assertEqual(suivi.bilan_depart()["nombre"], 1)
+
+    def test_seules_les_chauffes_recentes_comptent(self):
+        self._mesurees(*[40.0] * 5, jour=1)                              # anciennes
+        self._mesurees(*[50.0] * suivi.DEPART_CHAUFFES_MAX, jour=10)     # récentes
+        bilan = suivi.bilan_depart()
+        self.assertEqual(bilan["nombre"], suivi.DEPART_CHAUFFES_MAX)
+        self.assertEqual(bilan["ecart_moyen"], -2.0)
+
+    def test_delais_lisibles(self):
+        self.assertEqual(suivi._duree_lisible(45), "45 min")
+        self.assertEqual(suivi._duree_lisible(125), "2 h 05")
 
 
 def _chauffe(jour, temperature, duree, **champs):
@@ -699,6 +840,22 @@ class OngletDuSuivi(TestCase):
         page = self._page()
         self.assertContains(page, "55 min")
         self.assertContains(page, "(relevé 60)")
+
+    def test_ecart_entre_le_calcul_et_la_chauffe(self):
+        page = self._page()
+        self.assertContains(page, "Entre le calcul et la chauffe")
+        self.assertContains(page, "s'affichera ici dès la première")
+
+        prevision = dict(PREVISION, temperature=51.5, calcule_a="2026-10-05T11:00:00")
+        with _besoins(prevision):
+            _chauffer_par_paliers(a(13, 30))     # départ réel à 46,9 °C
+        page = self._page()
+        self.assertContains(page, "-4,6 °C")
+        self.assertContains(page, "2 h 30")
+        self.assertContains(page, "prévision faite à 51,5 °C")
+        self.assertContains(page, "1 chauffe mesurée,")
+        self.assertContains(page, "il en faut 10 pour en tirer une conclusion")
+        self.assertContains(page, "Rien n'est corrigé pour l'instant")
 
     def test_les_reglages_du_modele_s_enregistrent(self):
         self.client.post(self.URL, {

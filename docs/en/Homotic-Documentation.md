@@ -405,6 +405,8 @@ The **Prochaine chauffe, d'après la température du ballon** block shows what t
 
 What the estimate does not know: it starts from the temperature read **at calculation time**. If water is drawn between the calculation and the cycle, the tank will start colder; the *Prévu contre réel* block shows it as a forecast that is regularly too low.
 
+**Between the calculation and the cycle.** To find out whether that gap matters, the log **measures** it. Along with the forecast, each cycle started at the planned time keeps the tank temperature at calculation time and the time of that calculation. The **Entre le calcul et la chauffe** block averages the last twenty: the mean gap at start (starting temperature − temperature at calculation time; negative means the tank started colder than the forecast assumed), the mean delay between calculation and start, and the same gap converted into minutes of heating using the slope of the line. A forecast more than twenty hours old is left out. **Nothing is corrected for now**: the block measures and does not change the estimate; from ten cycles onwards it says there are enough to decide. If the gap turns out to be steady, the options are to move the last recalculation closer to the cycle, or to subtract the gap from the temperature before estimating.
+
 # Creating a module
 
 A module is a directory under `modules/`. The framework knows nothing about its contents: it reads its `conf.py` and calls the entry points the module declares. Adding a capability to the application therefore requires **no change to the framework**.

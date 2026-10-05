@@ -1021,6 +1021,39 @@ class DureeEstimeeParLeBallon(TestCase):
         self.assertEqual(info.duree_chauffe_min(), 46)
         self.assertTrue(calcul.dernier_resultat()["estimation"]["disponible"])
 
+    def test_le_creneau_publie_dit_sur_quoi_la_prevision_repose(self):
+        """Température du ballon et instant du calcul : le suivi les garde
+        pour mesurer de combien le ballon bouge avant la chauffe."""
+        avant = datetime.now().replace(microsecond=0)
+        with _estimation(ESTIMEE):
+            self._calculer()
+
+        creneau = info.creneau_retenu()
+        self.assertEqual(creneau["temperature"], 50.5)
+        calcule_a = datetime.fromisoformat(creneau["calcule_a"])
+        self.assertLessEqual(avant, calcule_a)
+        self.assertLessEqual(calcule_a, datetime.now())
+
+    def test_la_temperature_est_publiee_meme_quand_l_estimation_se_tait(self):
+        """Ballon hors plage : durée des réglages, mais la température lue
+        reste bonne à garder."""
+        with _estimation(MUETTE):
+            self._calculer()
+        self.assertEqual(info.creneau_retenu()["temperature"], 38.0)
+
+    def test_sans_estimation_branchee_pas_de_temperature(self):
+        with _estimation(ESTIMEE, branche=False):
+            self._calculer()
+        creneau = info.creneau_retenu()
+        self.assertIsNone(creneau["temperature"])
+        self.assertIsNotNone(creneau["calcule_a"])
+
+    def test_heure_saisie_a_la_main_sans_calcul(self):
+        set_variable("heure_demarrage_chauffe_eau", "04:30")
+        creneau = info.creneau_retenu()
+        self.assertIsNone(creneau["temperature"])
+        self.assertIsNone(creneau["calcule_a"])
+
     def test_besoin_non_branche_rien_ne_change(self):
         with _estimation(ESTIMEE, branche=False):
             r = self._calculer()

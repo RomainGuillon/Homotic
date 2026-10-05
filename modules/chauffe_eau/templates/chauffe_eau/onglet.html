@@ -556,6 +556,59 @@
             </div>
           {% endwith %}
 
+          {# --- Entre le calcul et la chauffe : le ballon a-t-il bougé ? --- #}
+          {% with d=suivi.depart %}
+            <div class="border rounded p-3 mb-3">
+              <div class="fw-bold mb-2"><i class="bi bi-hourglass-split me-2"></i>Entre le calcul et la chauffe</div>
+              {% if d.nombre %}
+                <div class="row text-center g-2 mb-2">
+                  <div class="col-6 col-md-4">
+                    <div class="fs-5 fw-bold">
+                      {% if d.ecart_moyen > 0 %}+{% endif %}{{ d.ecart_moyen }} °C</div>
+                    <div class="small text-secondary">
+                      écart moyen au départ
+                      {% if d.nombre > 1 %}
+                        <br><span class="text-faint">de {% if d.ecart_min > 0 %}+{% endif %}{{ d.ecart_min }}
+                          à {% if d.ecart_max > 0 %}+{% endif %}{{ d.ecart_max }} °C</span>
+                      {% endif %}
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-4">
+                    <div class="fs-5 fw-bold">{{ d.delai_moyen }}</div>
+                    <div class="small text-secondary">
+                      délai moyen calcul → chauffe
+                      {% if d.nombre > 1 %}
+                        <br><span class="text-faint">de {{ d.delai_min }} à {{ d.delai_max }}</span>
+                      {% endif %}
+                    </div>
+                  </div>
+                  <div class="col-12 col-md-4">
+                    <div class="fs-5 fw-bold">
+                      {% if d.minutes != None %}{% if d.minutes > 0 %}+{% endif %}{{ d.minutes }} min{% else %}—{% endif %}</div>
+                    <div class="small text-secondary">effet moyen sur la durée de chauffe</div>
+                  </div>
+                </div>
+                <p class="small text-secondary mb-0">
+                  Écart = température au départ − température au moment du calcul :
+                  négatif, le ballon est parti plus froid que la prévision ne le supposait.
+                  {% if d.suffisant %}
+                    {{ d.nombre }} chauffes mesurées : assez pour décider s'il faut en
+                    tenir compte dans l'estimation.
+                  {% else %}
+                    {{ d.nombre }} chauffe{{ d.nombre|pluralize }} mesurée{{ d.nombre|pluralize }},
+                    il en faut {{ d.minimum }} pour en tirer une conclusion.
+                  {% endif %}
+                  Rien n'est corrigé pour l'instant.</p>
+              {% else %}
+                <p class="text-secondary small mb-0">L'estimation part de la température du
+                  ballon au moment du calcul, parfois des heures avant la chauffe. Cette
+                  température et l'heure du calcul sont désormais gardées avec chaque
+                  chauffe partie à l'heure prévue : l'écart avec la température de départ
+                  s'affichera ici dès la première.</p>
+              {% endif %}
+            </div>
+          {% endwith %}
+
           {# --- Prévu contre réel : la prévision était-elle bonne ? --- #}
           {% with b=suivi.bilan %}
             <div class="border rounded p-3 mb-3">
@@ -672,6 +725,10 @@
                     <td class="small">
                       {{ s.temp_debut }} → {{ s.temp_fin }} °C
                       {% if s.delta_temp %}<span class="text-secondary">({{ s.delta_temp }} °C)</span>{% endif %}
+                      {% if s.baisse_avant_chauffe != None %}
+                        <br><span class="text-secondary">prévision faite à {{ s.prevu_temp }} °C{% if s.delai_lisible %},
+                          {{ s.delai_lisible }} avant{% endif %}</span>
+                      {% endif %}
                     </td>
                     <td class="text-end">
                       <strong>{{ s.energie_wh|floatformat:0 }} Wh</strong>

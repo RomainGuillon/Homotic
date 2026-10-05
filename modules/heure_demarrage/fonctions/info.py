@@ -83,14 +83,22 @@ def creneau_retenu():
     """Créneau de chauffe retenu (liaison entre modules, type « objet »).
 
     ``{"heure": "13:30", "duree_min": 60, "besoin_kwh": 2.5,
-       "mode": "solaire", "forcee": False, "perime": False}`` — ou ``None``
-    si aucune heure n'est retenue. ``forcee`` signale une heure saisie à la
-    main, ``perime`` un calcul qui date d'un autre jour : au consommateur de
-    décider ce qu'il en fait.
+       "mode": "solaire", "forcee": False, "perime": False,
+       "temperature": 50.5, "calcule_a": "2026-10-05T11:00:12"}`` — ou
+    ``None`` si aucune heure n'est retenue. ``forcee`` signale une heure
+    saisie à la main, ``perime`` un calcul qui date d'un autre jour : au
+    consommateur de décider ce qu'il en fait.
 
     ``duree_min`` et ``besoin_kwh`` forment la prévision du cycle : ce que
     le calcul a compté de temps et d'énergie pour la chauffe. Un
     consommateur peut les rapprocher de la chauffe réellement mesurée.
+
+    ``temperature`` et ``calcule_a`` disent sur quoi cette prévision repose :
+    la température du ballon annoncée par l'estimation, et l'instant du
+    calcul. ``None`` l'un comme l'autre quand ils sont inconnus — durée
+    venue des réglages sans estimation branchée, heure saisie à la main
+    sans calcul. Le ballon peut avoir bougé depuis : c'est justement ce
+    qu'un consommateur peut mesurer en les gardant.
     """
     r = calcul.dernier_resultat()
     heure = str(r.get("heure") or "").strip()
@@ -107,6 +115,8 @@ def creneau_retenu():
         besoin = float(r.get("besoin_kwh"))
     except (TypeError, ValueError):
         besoin = api.conso_chauffe_eau()
+    temperature = (r.get("estimation") or {}).get("temperature")
+    quand = r.get("quand")
     return {
         "heure": heure,
         "duree_min": duree,
@@ -114,6 +124,8 @@ def creneau_retenu():
         "mode": r.get("mode") or "",
         "forcee": bool(r.get("heure_forcee")),
         "perime": bool(r.get("perime")),
+        "temperature": temperature if isinstance(temperature, (int, float)) else None,
+        "calcule_a": quand.isoformat(timespec="seconds") if quand else None,
     }
 
 

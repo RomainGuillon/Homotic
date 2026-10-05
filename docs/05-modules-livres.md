@@ -599,3 +599,26 @@ atypique.
 Ce que l'estimation ne sait pas : elle part de la température lue **au
 moment du calcul**. Si de l'eau est tirée entre le calcul et la chauffe, le
 ballon partira plus froid. Le bloc *Prévu contre réel* le montre.
+
+### Entre le calcul et la chauffe
+
+Pour savoir si cet écart compte, le suivi le **mesure**. Avec la prévision,
+chaque chauffe partie à l'heure prévue garde la température qu'avait le
+ballon au moment du calcul et l'heure de ce calcul. Le bloc **Entre le
+calcul et la chauffe** en fait la moyenne sur les vingt dernières :
+
+| Valeur | Lecture |
+| --- | --- |
+| Écart moyen au départ | température au départ − température au moment du calcul. Négatif : le ballon est parti plus froid que la prévision ne le supposait |
+| Délai moyen | temps écoulé entre le calcul et le départ |
+| Effet sur la durée | le même écart, traduit en minutes de chauffe avec la pente de la droite |
+
+Chaque ligne du tableau rappelle aussi « prévision faite à 51,5 °C, 2 h 30
+avant ». Une prévision vieille de plus de vingt heures (calcul non refait
+ce jour-là) n'entre pas dans la moyenne.
+
+**Rien n'est corrigé pour l'instant** : le bloc mesure, il ne modifie pas
+l'estimation. À partir de dix chauffes, il dit qu'il y en a assez pour
+décider. Si l'écart se révèle régulier, deux suites sont possibles : avancer
+le dernier recalcul plus près de la chauffe, ou retirer cet écart de la
+température avant d'estimer.

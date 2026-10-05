@@ -1,54 +1,26 @@
-Chauffe-eau : durée de chauffe estimée d'après la température du ballon
+Chauffe-eau : mesure de l'écart de température entre le calcul et la chauffe
 
-Le calcul de l'heure plaçait une chauffe de durée fixe par saison (60 ou
-90 min) pour une consommation saisie à la main. Les 71 chauffes mesurées
-depuis juillet montrent que la durée suit la température de départ, sur
-une droite : rejouée chauffe après chauffe sur cet historique, elle prédit
-la durée à 3,8 min près (95 % des chauffes à ± 10 min) et l'énergie à
-0,15 kWh près, là où les réglages fixes se trompent de 19 min et 0,75 kWh.
+L'estimation de la durée part de la température du ballon au moment du
+calcul, parfois plusieurs heures avant le départ. Si de l'eau est tirée
+entre-temps, le ballon part plus froid et la chauffe dure plus longtemps
+que prévu. Avant de corriger quoi que ce soit, on mesure.
 
-Suivi des chauffes
-- fin de chauffe estimée : la passerelle ne repousse l'état du ballon que
-  toutes les dix minutes, l'arrêt était donc vu en retard et la durée
-  arrondie à la dizaine supérieure. À la clôture, l'arrêt réel est situé
-  d'après la montée du bas de cuve (champ duree_estimee_min) et l'énergie
-  n'est intégrée que jusque-là. La durée relevée reste affichée ;
-- eau tirée pendant la chauffe (le bas de cuve redescend) : champ tirage ;
-- chauffe partie autour de l'heure prévue ou non : champ planifiee ;
-- migration 0003 : ajoute les trois champs et relit les chauffes dont les
-  relevés minute existent encore (durée estimée, énergie, tirage). Une
-  chauffe coupée par la purge des 60 jours est laissée telle quelle.
+- le créneau publié par Heure de démarrage (creneau_retenu) porte deux
+  clés de plus : temperature, celle du ballon annoncée par l'estimation,
+  et calcule_a, l'instant du calcul. None quand ils sont inconnus ;
+- le suivi les fige au démarrage avec le reste de la prévision : champs
+  prevu_temp et prevu_calcule_a de ChauffeSession (migration 0004). Les
+  chauffes déjà enregistrées gardent ces champs vides ;
+- bloc « Entre le calcul et la chauffe » dans l'onglet : écart moyen au
+  départ, délai moyen entre le calcul et le départ, et le même écart
+  traduit en minutes de chauffe avec la pente du modèle. Sur les vingt
+  dernières chauffes parties à l'heure prévue ; une prévision vieille de
+  plus de vingt heures n'entre pas dans la moyenne ;
+- chaque ligne du tableau et le Journal rappellent la température et le
+  délai de la prévision.
 
-Modèle de durée (fonctions/modele.py)
-- droite durée = f(température de départ), réapprise à chaque lecture sur
-  les 25 dernières chauffes planifiées et sans eau tirée ; l'énergie se
-  déduit de la puissance de chauffe constatée ;
-- il se tait plutôt que de deviner : moins de 12 chauffes, ballon hors de
-  la plage des départs déjà vus (à 1 °C près), température inconnue,
-  droite qui ne descend pas. Quand il répond, la durée reste entre deux
-  bornes (15 et 120 min) ;
-- ces cinq seuils se règlent dans le paramétrage de l'onglet ;
-- nouvelles infos : estimation_chauffe (objet, pour les liaisons),
-  duree_chauffe_estimee et energie_chauffe_estimee (pour les scénarios) ;
-- l'onglet montre l'estimation du moment, ou la raison de son absence.
+Rien n'est corrigé : l'estimation et le calcul de l'heure sont inchangés.
+À partir de dix chauffes mesurées, le bloc dit qu'il y en a assez pour
+décider d'une correction.
 
-Heure de démarrage
-- nouveau besoin estimation_chauffe : quand il est branché et qu'il
-  répond, la durée et l'énergie de la chauffe viennent de lui. Dans tous
-  les autres cas (non branché, fournisseur muet ou en panne, annonce
-  inutilisable), les réglages de saison servent comme avant, et le détail
-  du calcul dit pourquoi ;
-- migration core 0016 : branche le besoin sur
-  chauffe_eau.estimation_chauffe là où le chauffe-eau lit déjà sa
-  prévision chez ce module. Pour revenir aux durées fixes : débrancher le
-  besoin dans Configuration → Liaisons ;
-- l'info duree_chauffe_min rend la durée du calcul du jour (estimée ou
-  de saison), et non plus toujours celle de la saison ;
-- carte Saison : la phrase annonçant une bascule automatique par la date
-  était fausse (seul le switch Hiver décide), elle est corrigée.
-
-Non modifié : l'estimation du ballon de demain dans le plan des machines
-garde les réglages de saison.
-
-Documentation (FR, EN, DE) : sections Heure de démarrage, Suivi des
-chauffes, « Estimer la prochaine chauffe » et liaisons.
+Documentation (FR, EN, DE) mise à jour.
