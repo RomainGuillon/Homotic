@@ -31,7 +31,18 @@ def mode_retenu():
 
 
 def duree_chauffe_min():
-    """Durée de chauffe retenue selon la saison (minutes)."""
+    """Durée de chauffe retenue (minutes).
+
+    Celle du calcul du jour : estimée d'après le ballon si le besoin
+    ``estimation_chauffe`` a répondu, sinon celle de la saison. Sans calcul
+    du jour, la durée de la saison.
+    """
+    r = calcul.dernier_resultat()
+    if not r.get("jamais_calcule") and not r.get("perime") and r.get("duree_min"):
+        try:
+            return int(r["duree_min"])
+        except (TypeError, ValueError):
+            pass
     return api.duree_chauffe_min()
 
 

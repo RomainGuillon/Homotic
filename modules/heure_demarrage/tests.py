@@ -14,7 +14,10 @@ Deux choses sont vérifiées ici :
   (switch « Optimisé » sur on, ou jour rouge), sait reporter au lendemain un
   cycle qui n'a plus de place, et ne repropose pas une machine déjà lancée ;
 - le calcul du chauffe-eau, qui pilote une chauffe réelle : l'arrivée des
-  machines dans le module ne doit rien changer à ce qu'il décide.
+  machines dans le module ne doit rien changer à ce qu'il décide ;
+- la durée et l'énergie de la chauffe : celles qu'estime le fournisseur
+  branché sur ``estimation_chauffe`` quand il répond, et dans tous les
+  autres cas les réglages du module, comme avant.
 """
 
 import importlib
@@ -956,6 +959,196 @@ class PrevisionPubliee(TestCase):
 
     def test_aucune_heure_aucune_prevision(self):
         self.assertIsNone(info.creneau_retenu())
+
+
+def _estimation(annonce, branche=True):
+    """Remplace ``core.liaisons.lire_besoin`` : seule l'estimation répond.
+
+    ``annonce`` est ce que publie le fournisseur ; ``branche=False`` simule
+    un besoin laissé libre dans Configuration → Liaisons.
+    """
+    def lire(_module, nom):
+        if nom == "estimation_chauffe" and branche:
+            return annonce, ""
+        return None, "besoin non branché (voir Configuration → Liaisons)"
+    return mock.patch("core.liaisons.lire_besoin", side_effect=lire)
+
+
+ESTIMEE = {"disponible": True, "duree_min": 46, "besoin_kwh": 1.84,
+           "temperature": 50.5, "chauffes": 25, "bornee": False, "raison": ""}
+MUETTE = {"disponible": False, "duree_min": None, "besoin_kwh": None,
+          "temperature": 38.0, "chauffes": 25, "bornee": False,
+          "raison": "ballon à 38 °C, hors de la plage connue (44,4 à 54,9 °C)"}
+
+
+class DureeEstimeeParLeBallon(TestCase):
+    """La durée et l'énergie de la chauffe viennent du ballon quand il sait.
+
+    Le garde-fou qui compte : dans tous les cas où l'estimation manque, le
+    calcul retombe sur les réglages de saison — le comportement d'avant.
+    """
+
+    def setUp(self):
+        set_setting("temp_chauffe_ete", "60", module=api.MODULE)
+        set_setting("conso_chauffe_eau", "2.40", module=api.MODULE)
+
+    def _calculer(self):
+        # Aucune prévision solaire : la décision (heures creuses) n'est pas
+        # le sujet, seules la durée et l'énergie retenues le sont.
+        with mock.patch.object(calcul, "_forecast_points", return_value=([], "")):
+            return calcul.calculer()
+
+    def test_l_estimation_remplace_les_reglages(self):
+        with _estimation(ESTIMEE):
+            r = self._calculer()
+
+        self.assertEqual((r["duree_min"], r["besoin_kwh"]), (46, 1.84))
+        self.assertTrue(r["estimation"]["disponible"])
+        self.assertIn(
+            "ballon à 50,5 °C → durée de chauffe estimée 46 min ; "
+            "besoin du ballon estimé 1.84 kWh (d'après 25 chauffes mesurées)",
+            r["detail"][0],
+        )
+
+    def test_elle_est_publiee_et_relue_telle_quelle(self):
+        """Mémorisée avec le calcul : c'est elle que le suivi comparera au
+        réel, et que les machines retirent de la production."""
+        with _estimation(ESTIMEE):
+            self._calculer()
+
+        creneau = info.creneau_retenu()
+        self.assertEqual((creneau["duree_min"], creneau["besoin_kwh"]), (46, 1.84))
+        self.assertEqual(info.duree_chauffe_min(), 46)
+        self.assertTrue(calcul.dernier_resultat()["estimation"]["disponible"])
+
+    def test_besoin_non_branche_rien_ne_change(self):
+        with _estimation(ESTIMEE, branche=False):
+            r = self._calculer()
+
+        self.assertEqual((r["duree_min"], r["besoin_kwh"]), (60, 2.4))
+        self.assertIsNone(r["estimation"])
+        self.assertTrue(r["detail"][0].startswith(
+            "Données : saison ete → durée de chauffe 60 min ; "
+            "besoin du ballon 2.40 kWh ; talon maison"
+        ))
+
+    def test_le_fournisseur_se_tait_on_garde_les_reglages_et_on_dit_pourquoi(self):
+        with _estimation(MUETTE):
+            r = self._calculer()
+
+        self.assertEqual((r["duree_min"], r["besoin_kwh"]), (60, 2.4))
+        self.assertFalse(r["estimation"]["disponible"])
+        self.assertIn("saison ete → durée de chauffe 60 min", r["detail"][0])
+        self.assertIn("pas d'estimation d'après le ballon — ballon à 38 °C", r["detail"][0])
+
+    def test_le_repli_suit_la_saison(self):
+        from core.models import Control
+
+        set_setting("temp_chauffe_hiver", "90", module=api.MODULE)
+        Control.objects.create(type=Control.SWITCH, name="hiver", label="Hiver", is_on=True)
+        with _estimation(MUETTE):
+            r = self._calculer()
+        self.assertEqual((r["saison"], r["duree_min"]), ("hiver", 90))
+
+    def test_une_annonce_inutilisable_vaut_un_silence(self):
+        """Durée nulle, énergie illisible, mauvais type : jamais de chauffe
+        planifiée sur une valeur absurde."""
+        inutilisables = (
+            None,                                      # rien à répondre
+            "46 min",                                  # mauvais type branché
+            {},                                        # objet vide
+            dict(ESTIMEE, duree_min=0),                # durée nulle
+            dict(ESTIMEE, duree_min=-5),
+            dict(ESTIMEE, besoin_kwh="beaucoup"),      # énergie illisible
+            dict(ESTIMEE, besoin_kwh=0),
+        )
+        for annonce in inutilisables:
+            with self.subTest(annonce=annonce):
+                with _estimation(annonce):
+                    r = self._calculer()
+                self.assertEqual((r["duree_min"], r["besoin_kwh"]), (60, 2.4))
+
+    def test_une_liaison_en_panne_vaut_un_silence(self):
+        # « lire_besoin » ne lève jamais : une panne arrive sous cette forme.
+        with mock.patch("core.liaisons.lire_besoin",
+                        return_value=(None, "lecture en erreur : boum")):
+            r = self._calculer()
+        self.assertEqual((r["duree_min"], r["besoin_kwh"]), (60, 2.4))
+
+    def test_la_duree_estimee_dimensionne_le_creneau(self):
+        """25 min tiennent dans un pas de prévision, 60 min en demandent
+        deux : le ballon tiède trouve sa place là où il n'y a qu'une
+        demi-heure de soleil."""
+        eclaircie = [(a(10) + timedelta(minutes=30 * i + 15), kw)
+                     for i, kw in enumerate([0.2, 0.2, 5.0, 0.2, 0.2])]
+        with mock.patch.object(calcul, "_forecast_points", return_value=(eclaircie, "")):
+            with _estimation(dict(ESTIMEE, duree_min=25, besoin_kwh=1.0)):
+                court = calcul.calculer()
+            with _estimation(ESTIMEE, branche=False):
+                long_ = calcul.calculer()
+
+        self.assertEqual(court["creneau"]["duree_h"], 0.5)
+        self.assertEqual(court["creneau"]["import_kwh"], 0.0)
+        self.assertEqual(long_["creneau"]["duree_h"], 1.0)
+        self.assertGreater(long_["creneau"]["import_kwh"], 0.0)
+
+    def test_sans_calcul_du_jour_la_duree_publiee_est_celle_de_la_saison(self):
+        self.assertEqual(info.duree_chauffe_min(), 60)
+
+    def test_un_calcul_d_avant_l_estimation_se_relit(self):
+        """Le calcul mémorisé avant cette évolution n'a pas la clé."""
+        _ballon("13:30")
+        r = calcul.dernier_resultat()
+        self.assertIsNone(r.get("estimation"))
+        self.assertTrue(calcul.detail_texte(dict(r, talon_kwh_h=0.3))[0].startswith(
+            "Données : saison ete → durée de chauffe 60 min"
+        ))
+
+
+class LiaisonDeLEstimation(TestCase):
+    """L'estimation est un besoin nouveau : la migration core 0016 le
+    branche là où le chauffe-eau lit déjà sa prévision chez ce module."""
+
+    CLE = "besoin_estimation_chauffe"
+
+    def _migration(self):
+        return importlib.import_module("core.migrations.0016_liaison_estimation_chauffe")
+
+    def test_le_besoin_est_declare_et_branche(self):
+        from core.liaisons import besoins_du_module, liaison
+
+        besoin = next(
+            b for b in besoins_du_module(api.MODULE) if b["nom"] == "estimation_chauffe"
+        )
+        self.assertEqual(besoin["type"], "objet")
+        self.assertFalse(besoin["obligatoire"])
+        # La base de test sort des migrations : 0014 a branché la prévision
+        # du chauffe-eau sur ce module, 0016 a donc branché l'estimation.
+        self.assertEqual(
+            liaison(api.MODULE, "estimation_chauffe"), "chauffe_eau.estimation_chauffe"
+        )
+
+    def test_un_branchement_deja_choisi_n_est_pas_ecrase(self):
+        set_setting(self.CLE, "autre.estimation", module=api.MODULE)
+        self._migration().brancher(apps, None)
+        self.assertEqual(get_setting(self.CLE, module=api.MODULE), "autre.estimation")
+
+    def test_sans_chauffe_eau_branche_sur_ce_module_on_ne_devine_pas(self):
+        Setting.objects.filter(module=api.MODULE, key=self.CLE).delete()
+        Setting.objects.filter(module="chauffe_eau", key="besoin_prevision_chauffe").delete()
+        self._migration().brancher(apps, None)
+        self.assertFalse(
+            Setting.objects.filter(module=api.MODULE, key=self.CLE).exists()
+        )
+
+    def test_debrancher_ne_retire_que_ce_qu_elle_a_pose(self):
+        self._migration().debrancher(apps, None)
+        self.assertFalse(
+            Setting.objects.filter(module=api.MODULE, key=self.CLE).exists()
+        )
+        set_setting(self.CLE, "autre.estimation", module=api.MODULE)
+        self._migration().debrancher(apps, None)
+        self.assertEqual(get_setting(self.CLE, module=api.MODULE), "autre.estimation")
 
 
 class LiaisonDuLendemain(TestCase):

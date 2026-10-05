@@ -203,13 +203,27 @@ l'horloge, que le déclencheur ne rattrapait jamais.
 calcul mémorisé : si les deux diffèrent, l'interface affiche l'heure forcée
 avec la mention correspondante.
 
+**Durée et énergie de la chauffe.** Le calcul place une chauffe d'une
+certaine durée, qui demande une certaine énergie. Les deux viennent du besoin
+**Estimation de la chauffe** quand il est branché (Configuration → Liaisons)
+et qu'il répond : le module Chauffe-eau les estime d'après la température du
+ballon — voir *Estimer la prochaine chauffe* plus bas. L'onglet et le
+Journal disent alors « estimée, ballon à 49,5 °C ».
+
+Dans tous les autres cas, les **réglages** du module servent, comme avant :
+`temp_chauffe_ete` ou `temp_chauffe_hiver` pour la durée, `conso_chauffe_eau`
+pour l'énergie. C'est le repli quand le besoin n'est pas branché, et aussi
+quand le fournisseur préfère se taire (trop peu de chauffes mesurées, ballon
+plus froid que tout ce qu'il a vu) — l'écran en donne alors la raison.
+
 Saison : le switch **Hiver** décide. S'il est éteint — que « Été » soit
 allumé ou que les deux soient éteints — c'est **été**, donc la durée de
 chauffe courte. Aucun basculement automatique par la date.
 
 Infos utiles en condition : `heure_demarrage`, `mode_retenu`,
-`calcul_du_jour` (le calcul date-t-il d'aujourd'hui ?), `heure_calcul`,
-`gain_estime_eur`, `surplus_creneau_kwh`.
+`duree_chauffe_min` (celle du calcul du jour), `calcul_du_jour` (le calcul
+date-t-il d'aujourd'hui ?), `heure_calcul`, `gain_estime_eur`,
+`surplus_creneau_kwh`.
 
 ### Les machines
 
@@ -486,6 +500,16 @@ puissance de la résistance. Chaque chauffe donne une ligne dans la carte
 **Suivi des chauffes** de l'onglet — durée, énergie consommée, degrés
 gagnés.
 
+**La durée affichée est une fin de chauffe estimée.** La passerelle
+Cozytouch ne repousse l'état du ballon que toutes les dix minutes environ :
+l'arrêt est donc vu avec jusqu'à dix minutes de retard, et une chauffe de
+44 min serait enregistrée 50 min, pour 2,0 kWh au lieu de 1,76. À la
+clôture, le suivi situe l'arrêt réel d'après la montée du bas de cuve et
+n'intègre l'énergie que jusque-là. La durée relevée reste affichée entre
+parenthèses. Une ligne marquée **eau tirée** est une chauffe pendant
+laquelle le bas de cuve est redescendu : quelqu'un a tiré de l'eau chaude,
+elle a donc duré plus longtemps que prévu.
+
 Quand une chauffe démarre autour de l'heure prévue (par défaut, de dix
 minutes avant à vingt minutes après), le suivi fige en plus **ce que la
 prévision annonçait pour elle** : la durée et l'énergie que le calcul de
@@ -507,10 +531,13 @@ Le bloc **Prévu contre réel** fait la moyenne des vingt dernières chauffes
 comparées et, à partir de trois, rend un verdict : prévision **juste**
 (écart moyen dans ± 10 %), **trop haute** ou **trop basse**. C'est l'écart
 *moyen* qui juge. Une chauffe isolée s'écarte toujours, selon l'eau tirée la
-veille ; une erreur dans le même sens chauffe après chauffe désigne un
-réglage à reprendre — `conso_chauffe_eau` pour l'énergie,
-`temp_chauffe_ete` et `temp_chauffe_hiver` pour la durée, dans l'onglet
-Heure de démarrage.
+veille ; une erreur dans le même sens chauffe après chauffe désigne quelque
+chose à reprendre. Si la durée vient des réglages : `conso_chauffe_eau` pour
+l'énergie, `temp_chauffe_ete` et `temp_chauffe_hiver` pour la durée, dans
+l'onglet Heure de démarrage. Si elle est estimée d'après le ballon et sort
+régulièrement **trop basse**, c'est en général que le calcul est lancé trop
+tôt : de l'eau est tirée entre le calcul et la chauffe, le ballon part plus
+froid qu'il n'était au moment de l'estimation.
 
 Les deux erreurs ne coûtent pas pareil. Trop basse, le calcul croit le
 ballon couvert par le surplus solaire alors qu'une partie de la chauffe est
@@ -524,3 +551,51 @@ douche), elle date d'avant cette comparaison, ou le besoin **Prévision de la
 chauffe** n'est pas branché dans Configuration → Liaisons. Il l'est d'office
 sur `heure_demarrage.creneau_retenu` quand l'heure de chauffe vient déjà de
 ce module.
+
+### Estimer la prochaine chauffe
+
+Le suivi sert à cela : savoir ce que demandera la chauffe du jour, au lieu
+d'une durée fixe par saison. La résistance chauffe à puissance constante,
+donc l'énergie suit la durée, et la durée suit la température de départ :
+plus le ballon est froid, plus c'est long. Sur les mesures, la relation est
+une droite — de l'ordre de 3 minutes de plus par degré en moins.
+
+Le bloc **Prochaine chauffe, d'après la température du ballon** montre ce
+que cette droite annonce pour une chauffe qui partirait maintenant : durée,
+énergie, et de combien la droite s'écarte en moyenne des chauffes qui l'ont
+réglée. La même estimation est publiée pour les autres modules (info
+`estimation_chauffe`) et pour les scénarios (`duree_chauffe_estimee`,
+`energie_chauffe_estimee`).
+
+**La droite est réapprise en continu** sur les dernières chauffes (25 par
+défaut). Elle suit donc la saison sans réglage : quand l'eau froide baisse,
+les chauffes s'allongent et la fenêtre glisse avec elles.
+
+**Seules certaines chauffes apprennent** : celles parties à l'heure prévue,
+sans eau tirée en cours de route. Une chauffe lancée à la main la veille
+d'un retour d'absence, ou une relance du ballon en mode « toujours plein »,
+est mesurée et affichée, mais ne règle pas la droite — ce n'est pas ce que
+le calcul aura à prévoir.
+
+**L'estimation préfère se taire que deviner.** Elle est indisponible, et le
+bloc dit pourquoi :
+
+| Cas | Pourquoi |
+| --- | --- |
+| Moins de 12 chauffes exploitables | pas assez pour une droite |
+| Ballon hors de la plage des départs déjà vus, à 1 °C près | ce serait de l'extrapolation — typiquement un retour d'absence |
+| Température du ballon inconnue | rien à estimer |
+| Droite qui ne descend pas | les chauffes récentes ne disent rien d'exploitable |
+
+Le module qui lit l'estimation retombe alors sur ses propres réglages : au
+pire, on retrouve le comportement d'une durée fixe. Et quand l'estimation
+répond, la durée reste entre deux bornes (15 et 120 min par défaut).
+
+Ces seuils se règlent dans le paramétrage de l'onglet, rubrique *Estimation
+de la durée de chauffe*. Réduire le nombre de chauffes apprises fait suivre
+la saison plus vite, au prix d'une droite plus sensible à une chauffe
+atypique.
+
+Ce que l'estimation ne sait pas : elle part de la température lue **au
+moment du calcul**. Si de l'eau est tirée entre le calcul et la chauffe, le
+ballon partira plus froid. Le bloc *Prévu contre réel* le montre.

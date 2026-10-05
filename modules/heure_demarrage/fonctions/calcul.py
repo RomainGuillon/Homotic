@@ -7,9 +7,12 @@
 
 """Calcul de la meilleure heure de démarrage du chauffe-eau.
 
-Durée de chauffe : temp_chauffe_ete (1 h par défaut) ou temp_chauffe_hiver
-(1 h 30) selon les switchs Été/Hiver — les fenêtres testées font donc 2 pas
-de prévision de 30 min en été, 3 pas en hiver.
+Durée et énergie de la chauffe : celles qu'annonce le besoin
+``estimation_chauffe`` quand il est branché et qu'il répond — une estimation
+faite d'après la température du ballon et ses chauffes passées. Sinon, les
+réglages : temp_chauffe_ete (1 h par défaut) ou temp_chauffe_hiver (1 h 30)
+selon les switchs Été/Hiver, et conso_chauffe_eau. Les fenêtres testées
+couvrent la durée arrondie au pas de prévision de 30 min supérieur.
 
 Sur chaque fenêtre possible de la journée à venir :
 
@@ -31,8 +34,8 @@ n'entre dans le calcul. Si « optimiser » est coché, le moins cher des deux
 gagne (égalité → journée solaire) ; sinon on garde simplement la fenêtre
 retenue ci-dessus.
 
-Les deux données d'entrée — la prévision de production et la tarification —
-viennent de **besoins déclarés** (voir ``conf.py`` et
+Les données d'entrée — la prévision de production, la tarification,
+l'estimation de la chauffe — viennent de **besoins déclarés** (voir ``conf.py`` et
 ``docs/09-liaisons-entre-modules.md``) : ce module ne connaît aucun autre
 module par son nom. Sans prévision branchée, le calcul se rabat sur l'heure
 de nuit ; sans tarifs, il garde le créneau solaire sans arbitrer les coûts.
@@ -78,6 +81,76 @@ def _forecast_points():
     now = datetime.now().astimezone()
     today = date.today()
     return [(t, kw) for t, kw in points if t.date() == today and t >= now], ""
+
+
+def _duree_et_besoin():
+    """Durée (min) et énergie (kWh) de la chauffe à placer, et d'où elles viennent.
+
+    Retourne ``(duree_min, besoin_kwh, estimation)``. Si le besoin
+    ``estimation_chauffe`` est branché et annonce une durée et une énergie
+    utilisables, ce sont elles : la chauffe du jour, estimée d'après l'état
+    du ballon. Dans tous les autres cas — besoin non branché, fournisseur en
+    panne, ou qui préfère se taire — on retombe sur les réglages du module :
+    durée de la saison et consommation saisie. C'est le comportement
+    d'avant, il ne peut donc pas être pire.
+
+    ``estimation`` est mémorisée avec le calcul, pour que l'écran et le
+    Journal disent sur quoi la durée repose : ``None`` si rien n'est
+    branché, sinon ``{"disponible", "temperature", "chauffes", "bornee",
+    "raison"}`` — ``raison`` expliquant un repli.
+    """
+    from core.liaisons import lire_besoin
+
+    reglages = (api.duree_chauffe_min(), api.conso_chauffe_eau())
+    annonce, _err = lire_besoin(MODULE, "estimation_chauffe")
+    if not isinstance(annonce, dict):
+        return (*reglages, None)
+
+    try:
+        duree = int(round(float(annonce.get("duree_min"))))
+        besoin = float(annonce.get("besoin_kwh"))
+    except (TypeError, ValueError):
+        duree, besoin = 0, 0.0
+    estimation = {
+        "disponible": duree > 0 and besoin > 0,
+        "temperature": annonce.get("temperature"),
+        "chauffes": annonce.get("chauffes"),
+        "bornee": bool(annonce.get("bornee")),
+        "raison": str(annonce.get("raison") or ""),
+    }
+    if not estimation["disponible"]:
+        return (*reglages, estimation)
+    return duree, besoin, estimation
+
+
+def _donnees_de_chauffe(r):
+    """Début du détail : d'où viennent la durée et le besoin du ballon."""
+    estimation = r.get("estimation") or {}
+    if estimation.get("disponible"):
+        ballon = (
+            f"ballon à {estimation['temperature']:g} °C".replace(".", ",")
+            if isinstance(estimation.get("temperature"), (int, float))
+            else "état du ballon"
+        )
+        texte = (
+            f"Données : {ballon} → durée de chauffe estimée {r['duree_min']} min"
+            f"{' (ramenée à la borne réglée)' if estimation.get('bornee') else ''} ; "
+            f"besoin du ballon estimé {r['besoin_kwh']:.2f} kWh"
+        )
+        if estimation.get("chauffes"):
+            texte += f" (d'après {estimation['chauffes']} chauffes mesurées)"
+        return texte
+
+    texte = (
+        f"Données : saison {r['saison']} → durée de chauffe {r['duree_min']} min ; "
+        f"besoin du ballon {r['besoin_kwh']:.2f} kWh"
+    )
+    if estimation.get("raison"):
+        texte += (
+            f" (réglages du module : pas d'estimation d'après le ballon — "
+            f"{estimation['raison']})"
+        )
+    return texte
 
 
 def _meilleur_creneau(points, duree_min, talon_kwh_h, besoin_kwh, mode="faible",
@@ -192,11 +265,7 @@ def detail_texte(r):
     """
     jour_seul = r.get("arbitrage") == "jour"
 
-    entete = (
-        f"Données : saison {r['saison']} → durée de chauffe {r['duree_min']} min ; "
-        f"besoin du ballon {r['besoin_kwh']:.2f} kWh ; "
-        f"talon maison {r['talon_kwh_h']:.2f} kWh/h"
-    )
+    entete = f"{_donnees_de_chauffe(r)} ; talon maison {r['talon_kwh_h']:.2f} kWh/h"
     if jour_seul:
         entete += " ; arbitrage JOUR : les heures creuses sont passées, pas de comparaison."
     else:
@@ -362,7 +431,7 @@ def _resultat_vide(erreur):
         ("heure", "mode", "creneau", "saison", "duree_min", "optimiser",
          "heure_nuit", "besoin_kwh", "talon_kwh_h", "cout_jour", "cout_nuit",
          "gain", "couleur", "prix_hp", "prix_hc", "part_solaire_kwh",
-         "part_reseau_kwh")
+         "part_reseau_kwh", "estimation")
     )
     vide.update({
         "detail": [], "erreur": erreur, "quand": None,
@@ -425,8 +494,11 @@ def _appliquer_variable(resultat):
 def calculer(tracer=False, arbitrage="nuit"):
     """Retourne un dict décrivant la décision.
 
-    {heure, mode, saison, duree_min, creneau, cout_jour, cout_nuit,
-     part_solaire_kwh, part_reseau_kwh, gain, couleur, erreur, detail}
+    {heure, mode, saison, duree_min, estimation, creneau, cout_jour,
+     cout_nuit, part_solaire_kwh, part_reseau_kwh, gain, couleur, erreur,
+     detail}
+    ``estimation`` : d'où viennent ``duree_min`` et ``besoin_kwh`` — voir
+    ``_duree_et_besoin``.
     ``mode`` : "solaire" (créneau du jour) ou "nuit" (heure creuse).
     ``tracer`` : écrit le détail du calcul dans le Journal (tâche périodique
     et bouton Recalculer ; pas à chaque affichage de page).
@@ -443,11 +515,11 @@ def calculer(tracer=False, arbitrage="nuit"):
       renvoyer à une nuit déjà passée.
     """
     arbitrage = "jour" if str(arbitrage).lower() == "jour" else "nuit"
-    duree_min = api.duree_chauffe_min()
-    besoin = api.conso_chauffe_eau()
+    duree_min, besoin, estimation = _duree_et_besoin()
     resultat = {
         "saison": api.saison(),
         "duree_min": duree_min,
+        "estimation": estimation,
         "arbitrage": arbitrage,
         "optimiser": api.optimiser() and arbitrage == "nuit",
         "heure_nuit": api.heure_nuit(),

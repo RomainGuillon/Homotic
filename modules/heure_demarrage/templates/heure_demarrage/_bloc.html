@@ -12,7 +12,8 @@
   </div>
   <div class="text-end">
     <div class="fw-bold">{{ r.duree_min }} <span class="small">min</span></div>
-    <div class="text-secondary small">saison {{ r.saison }}</div>
+    <div class="text-secondary small">
+      {% if r.estimation.disponible %}estimée · ballon à {{ r.estimation.temperature }} °C{% else %}saison {{ r.saison }}{% endif %}</div>
   </div>
 </div>
 

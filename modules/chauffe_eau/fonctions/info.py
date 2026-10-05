@@ -121,7 +121,40 @@ def absence_jours_restants():
     return round((fin - datetime.now()).total_seconds() / 86400, 2)
 
 
+def estimation_chauffe():
+    """Estimation de la prochaine chauffe (liaison entre modules, type « objet »).
+
+    ``{"disponible": True, "duree_min": 46, "besoin_kwh": 1.84,
+       "temperature": 50.0, "chauffes": 25, "bornee": False, "raison": ""}``
+
+    Durée et énergie d'une chauffe qui partirait maintenant, d'après la
+    température du ballon et les dernières chauffes mesurées. ``disponible``
+    faux : le modèle préfère se taire (trop peu de chauffes, ballon hors de
+    la plage connue…), ``raison`` dit pourquoi et les deux valeurs sont à
+    ``None`` — au consommateur de retomber sur ses propres réglages.
+    Voir ``modele.py``.
+    """
+    from . import modele
+
+    return modele.estimation()
+
+
+def duree_chauffe_estimee():
+    """Durée estimée de la prochaine chauffe (min), ou None si pas d'estimation."""
+    return estimation_chauffe()["duree_min"]
+
+
+def energie_chauffe_estimee():
+    """Énergie estimée de la prochaine chauffe (kWh), ou None si pas d'estimation."""
+    return estimation_chauffe()["besoin_kwh"]
+
+
 INFOS = [
+    {"nom": "estimation_chauffe", "type": "objet",
+     "description": "Estimation de la prochaine chauffe (durée, énergie)"},
+    {"nom": "duree_chauffe_estimee", "description": "Durée estimée de la prochaine chauffe (min)"},
+    {"nom": "energie_chauffe_estimee",
+     "description": "Énergie estimée de la prochaine chauffe (kWh)"},
     {"nom": "temperature", "description": "Température du ballon (°C)"},
     {"nom": "consigne", "description": "Consigne (°C)"},
     {"nom": "bas_de_cuve", "description": "Température bas de cuve (°C)"},

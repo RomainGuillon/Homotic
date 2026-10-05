@@ -238,6 +238,10 @@ def onglet(request):
                 "ajustement": api.ajustement(),
             },
             "choix_ajustement": api.CHOIX["ajustement"],
+            # La saison et sa durée telles que réglées maintenant — et non
+            # celles du dernier calcul, dont la durée peut venir du ballon.
+            "saison": api.saison(),
+            "duree_saison": api.duree_chauffe_min(),
             # Le switch reprend l'arbitrage du dernier calcul : on retrouve
             # l'état dans lequel on a laissé les choses.
             "arbitrage_defaut": resultat.get("arbitrage") or "nuit",

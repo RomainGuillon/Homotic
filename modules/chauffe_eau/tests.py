@@ -16,7 +16,13 @@ Ce qui est verrouillé ici :
 - une prévision absente ou illisible ne coûte jamais l'enregistrement de la
   chauffe ;
 - le bilan juge sur l'écart moyen, et se tait tant qu'il a trop peu de
-  chauffes.
+  chauffes ;
+- la fin de chauffe est estimée : la passerelle ne rafraîchit le ballon
+  que toutes les dix minutes, la durée et l'énergie relevées telles quelles
+  seraient arrondies à la dizaine supérieure ;
+- le modèle de durée n'apprend que des chauffes planifiées et sans eau
+  tirée, et se tait plutôt que de deviner (trop peu de chauffes, ballon
+  hors de la plage connue).
 
 Les tables du module n'existent que s'il est activé dans la base qui a servi
 à lancer les tests : sinon ces tests sont sautés, plutôt que d'échouer sur
@@ -24,17 +30,19 @@ une table absente.
 """
 
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest import mock, skipUnless
 
 from django.apps import apps
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from core.liaisons import liaison, set_liaison
 from core.models import LogEntry, Module
+from core.services import set_setting
 from core.tests import connecte
 
-from .fonctions import api, suivi
+from .fonctions import api, modele, releves, suivi
 
 MODULE_ACTIF = apps.is_installed("modules.chauffe_eau")
 SANS_MODULE = "module chauffe_eau non activé : ses tables n'existent pas"
@@ -49,17 +57,17 @@ def a(heure, minute=0):
     return timezone.make_aware(datetime(2026, 10, 5, heure, minute))
 
 
-def _statut(puissance, temperature=40.0):
+def _statut(puissance, temperature=40.0, bas=None):
     """Statut du ballon tel que le rend ``api.get_status_cached``."""
-    return {
-        "heating": "on" if puissance else "off",
-        "raw": {
-            "modbuslink:MiddleWaterTemperatureState": temperature,
-            "core:TargetDHWTemperatureState": 62.0,
-            "modbuslink:PowerHeatElectricalState": puissance,
-            "modbuslink:PowerHeatPumpState": 0,
-        },
+    raw = {
+        "modbuslink:MiddleWaterTemperatureState": temperature,
+        "core:TargetDHWTemperatureState": 62.0,
+        "modbuslink:PowerHeatElectricalState": puissance,
+        "modbuslink:PowerHeatPumpState": 0,
     }
+    if bas is not None:
+        raw["core:BottomTankWaterTemperatureState"] = bas
+    return {"heating": "on" if puissance else "off", "raw": raw}
 
 
 def _besoins(prevision=PREVISION, heure="13:30"):
@@ -73,11 +81,11 @@ def _besoins(prevision=PREVISION, heure="13:30"):
     return mock.patch("core.liaisons.lire_besoin", side_effect=lire)
 
 
-def _releve(instant, puissance, temperature=40.0):
+def _releve(instant, puissance, temperature=40.0, bas=None):
     """Un passage de la tâche de suivi, à l'instant donné."""
     with mock.patch("django.utils.timezone.now", return_value=instant), \
             mock.patch.object(api, "get_status_cached",
-                              return_value=(_statut(puissance, temperature), None, "")):
+                              return_value=(_statut(puissance, temperature, bas), None, "")):
         suivi.tache_suivi()
 
 
@@ -92,6 +100,352 @@ def _session():
     from .models import ChauffeSession
 
     return ChauffeSession.objects.get()
+
+
+# Une chauffe telle que la passerelle la montre vraiment (relevée le
+# 19/09/2026) : les valeurs ne bougent que toutes les dix minutes. Par
+# palier : (minute, milieu de cuve, bas de cuve). Au dernier, la résistance
+# est vue éteinte — alors qu'elle s'est arrêtée quelque part avant.
+PALIERS = [(0, 46.9, 40.1), (10, 52.8, 44.3), (20, 57.9, 49.9), (30, 60.7, 55.2),
+           (40, 62.7, 58.7), (50, 64.8, 61.4), (60, 64.8, 62.7)]
+
+
+def _par_paliers(debut, paliers=PALIERS):
+    """Relevés minute d'une chauffe dont l'état n'avance que par paliers.
+
+    Rend ``[(instant, puissance, milieu, bas), …]`` : entre deux paliers la
+    même valeur est relue, comme en production.
+    """
+    fin = paliers[-1][0]
+    lignes = []
+    for minute in range(fin + 1):
+        _m, milieu, bas = [p for p in paliers if p[0] <= minute][-1]
+        lignes.append((debut + timedelta(minutes=minute),
+                       0 if minute == fin else 2400, milieu, bas))
+    return lignes
+
+
+def _chauffer_par_paliers(debut, paliers=PALIERS):
+    for instant, puissance, milieu, bas in _par_paliers(debut, paliers):
+        _releve(instant, puissance, milieu, bas)
+
+
+def _mesures(debut, paliers=PALIERS):
+    """Les mêmes relevés, en objets nus pour les fonctions de ``releves``."""
+    return [
+        SimpleNamespace(quand=instant, temp_milieu=milieu, temp_bas=bas,
+                        puissance_elec=float(puissance), puissance_pac=0.0)
+        for instant, puissance, milieu, bas in _par_paliers(debut, paliers)
+    ]
+
+
+class LectureDesReleves(SimpleTestCase):
+    """Ce que la série de relevés dit de la chauffe, malgré les paliers."""
+
+    def test_la_fin_est_situee_entre_les_deux_derniers_rafraichissements(self):
+        # Le bas de cuve montait de 2,7 °C en dix minutes (58,7 → 61,4) ; il
+        # lui restait 1,3 °C à prendre : un peu moins de cinq minutes.
+        fin = releves.fin_estimee(_mesures(a(13, 30)))
+        self.assertEqual(fin.replace(second=0, microsecond=0), a(14, 24))
+
+    def test_l_energie_s_arrete_a_la_fin_estimee(self):
+        lu = releves.bilan(_mesures(a(13, 30)), a(13, 30))
+        self.assertAlmostEqual(lu["duree_estimee_min"], 54.8, places=1)
+        # 54,8 min à 2 400 W, et non les 60 min relevées (2 400 Wh).
+        self.assertAlmostEqual(lu["elec_wh"], 2400 * 54.8 / 60, delta=5)
+        self.assertEqual(lu["pac_wh"], 0.0)
+        self.assertFalse(lu["tirage"])
+
+    def test_l_estimation_ne_sort_jamais_de_l_intervalle(self):
+        """Un bas de cuve qui bondit au dernier palier ne repousse pas la
+        fin après le relevé de clôture, ni avant le dernier rafraîchissement."""
+        tard = PALIERS[:-1] + [(60, 64.8, 75.0)]
+        tot = PALIERS[:-1] + [(60, 64.8, 61.4)]
+        self.assertEqual(releves.fin_estimee(_mesures(a(13, 30), tard)), a(14, 30))
+        self.assertEqual(releves.fin_estimee(_mesures(a(13, 30), tot)), a(14, 20))
+
+    def test_sans_bas_de_cuve_la_fin_relevee_fait_foi(self):
+        mesures = _mesures(a(13, 30))
+        for m in mesures:
+            m.temp_bas = None
+        lu = releves.bilan(mesures, a(13, 30))
+        self.assertIsNone(lu["duree_estimee_min"])
+        self.assertAlmostEqual(lu["elec_wh"], 2400.0, places=1)
+
+    def test_trop_peu_de_paliers_pour_estimer(self):
+        self.assertIsNone(releves.fin_estimee(_mesures(a(13, 30), PALIERS[:1] + [(8, 50.0, 42.0)])))
+        self.assertIsNone(releves.fin_estimee([]))
+
+    def test_bas_de_cuve_qui_ne_monte_plus(self):
+        plat = PALIERS[:4] + [(40, 62.7, 55.2), (50, 64.8, 55.2), (60, 64.8, 55.3)]
+        self.assertIsNone(releves.fin_estimee(_mesures(a(13, 30), plat)))
+
+    def test_eau_tiree_pendant_la_chauffe(self):
+        """Relevé le 09/09/2026 : le bas de cuve redescend de 44,1 à 40,2 °C."""
+        tirage = [(0, 48.6, 43.8), (9, 51.4, 44.1), (19, 51.6, 40.2), (30, 55.3, 43.8),
+                  (39, 58.6, 49.5), (49, 60.8, 54.9), (59, 63.0, 58.6), (70, 64.9, 61.4),
+                  (79, 64.9, 62.6)]
+        self.assertTrue(releves.eau_tiree(_mesures(a(13, 30), tirage)))
+        self.assertFalse(releves.eau_tiree(_mesures(a(13, 30))))
+
+    def test_un_trou_dans_les_releves_ne_cree_pas_d_energie(self):
+        mesures = _mesures(a(13, 30), [(0, 50.0, 45.0), (1, 51.0, 46.0)])
+        mesures[-1].quand = a(15, 30)  # service arrêté deux heures
+        elec, _pac = releves.energie_wh(mesures)
+        self.assertAlmostEqual(elec, 2400 * 5 / 60, places=1)
+
+
+@skipUnless(MODULE_ACTIF, SANS_MODULE)
+class ClotureDeLaChauffe(TestCase):
+    """La chauffe enregistrée porte sa durée réelle, pas la durée relevée."""
+
+    def test_duree_et_energie_corrigees(self):
+        with _besoins():
+            _chauffer_par_paliers(a(13, 30))
+
+        s = _session()
+        self.assertEqual(s.duree_min, 60)                    # ce qui a été relevé
+        self.assertAlmostEqual(s.duree_estimee_min, 54.8, places=1)
+        self.assertAlmostEqual(s.duree_reelle_min, 54.8, places=1)
+        self.assertAlmostEqual(s.energie_wh, 2400 * 54.8 / 60, delta=5)
+        self.assertFalse(s.tirage)
+        # La prévision (60 min, 2 500 Wh) est jugée sur la durée réelle.
+        self.assertEqual(s.ecart_duree_min, -5)
+        self.assertTrue(
+            LogEntry.objects.filter(
+                module="chauffe_eau", message__contains="arrêt réel estimé à 55 min"
+            ).exists()
+        )
+
+    def test_chauffe_relevee_a_la_minute_rien_a_corriger(self):
+        """Si un jour la passerelle pousse chaque minute, l'estimation se
+        confond avec la fin relevée."""
+        with _besoins():
+            for i in range(30):
+                _releve(a(13, 30) + timedelta(minutes=i), 2400, 50 + i * 0.5, 45 + i * 0.5)
+            _releve(a(14, 0), 0, 65.0, 60.0)
+
+        s = _session()
+        self.assertAlmostEqual(s.duree_estimee_min, 30.0, places=1)
+        self.assertAlmostEqual(s.energie_wh, 1200.0, places=0)
+
+    def test_une_chauffe_a_l_heure_prevue_est_planifiee(self):
+        with _besoins():
+            _chauffer_par_paliers(a(13, 31))
+        self.assertIs(_session().planifiee, True)
+        self.assertTrue(_session().apprend)
+
+    def test_une_chauffe_lancee_a_la_main_ne_l_est_pas(self):
+        """Veille d'un retour d'absence, relance du ballon : mesurée, mais
+        elle ne règle pas le modèle."""
+        with _besoins():
+            _chauffer_par_paliers(a(19, 0))
+        s = _session()
+        self.assertIs(s.planifiee, False)
+        self.assertGreater(s.energie_wh, 0)
+        self.assertFalse(s.apprend)
+
+    def test_planifiee_meme_sans_prevision_a_comparer(self):
+        """L'heure prévue suffit : la prévision détaillée peut manquer."""
+        with _besoins(prevision=None):
+            _chauffer_par_paliers(a(13, 30))
+        s = _session()
+        self.assertEqual(s.prevu_heure, "")
+        self.assertIs(s.planifiee, True)
+
+    def test_eau_tiree_la_chauffe_est_marquee(self):
+        tirage = [(0, 48.6, 43.8), (10, 51.4, 44.1), (20, 51.6, 40.2), (30, 55.3, 43.8),
+                  (40, 58.6, 49.5), (50, 60.8, 54.9), (60, 64.9, 61.4), (70, 64.9, 62.6)]
+        with _besoins():
+            _chauffer_par_paliers(a(13, 30), tirage)
+        s = _session()
+        self.assertTrue(s.tirage)
+        self.assertFalse(s.apprend)
+        self.assertTrue(
+            LogEntry.objects.filter(
+                module="chauffe_eau", message__contains="eau tirée pendant la chauffe"
+            ).exists()
+        )
+
+
+def _chauffe(jour, temperature, duree, **champs):
+    """Une chauffe déjà close, pour le modèle : départ, durée, 2 400 W."""
+    from .models import ChauffeSession
+
+    debut = a(13, 30) + timedelta(days=jour)
+    valeurs = dict(
+        debut=debut, fin=debut + timedelta(minutes=duree), duree_min=round(duree),
+        duree_estimee_min=duree, temp_debut=temperature, temp_fin=65.0,
+        energie_wh=40.0 * duree, energie_elec_wh=40.0 * duree, planifiee=True,
+    )
+    valeurs.update(champs)
+    return ChauffeSession.objects.create(**valeurs)
+
+
+def _droite(nombre=15, premier_jour=0):
+    """``nombre`` chauffes sur la droite durée = 200 − 3 × température,
+    départs de 45 à 55 °C."""
+    for i in range(nombre):
+        temperature = 45.0 + 10.0 * i / (nombre - 1)
+        _chauffe(premier_jour + i, temperature, 200 - 3 * temperature)
+
+
+@skipUnless(MODULE_ACTIF, SANS_MODULE)
+class ModeleDeDuree(TestCase):
+    """La durée de la prochaine chauffe, d'après la température du ballon."""
+
+    def test_la_droite_est_retrouvee(self):
+        _droite()
+        m = modele.modele()
+        self.assertTrue(m["fiable"])
+        self.assertEqual(m["nombre"], 15)
+        self.assertAlmostEqual(m["pente"], -3.0, places=2)
+        self.assertAlmostEqual(m["constante"], 200.0, places=0)
+        self.assertEqual((m["temp_min"], m["temp_max"]), (45.0, 55.0))
+        self.assertEqual(m["puissance_w"], 2400)
+        self.assertEqual(m["erreur_min"], 0.0)
+
+    def test_estimation_dans_la_plage(self):
+        _droite()
+        e = modele.estimation(50.0)
+        self.assertTrue(e["disponible"])
+        # 200 − 3 × 50 = 50 min ; à 2 400 W, 2 kWh.
+        self.assertEqual((e["duree_min"], e["besoin_kwh"]), (50, 2.0))
+        self.assertEqual((e["temperature"], e["chauffes"], e["bornee"]), (50.0, 15, False))
+
+    def test_trop_peu_de_chauffes(self):
+        _droite(nombre=11)
+        e = modele.estimation(50.0)
+        self.assertFalse(e["disponible"])
+        self.assertIsNone(e["duree_min"])
+        self.assertIsNone(e["besoin_kwh"])
+        self.assertIn("11 chauffes exploitables, il en faut 12", e["raison"])
+
+    def test_aucune_chauffe(self):
+        e = modele.estimation(50.0)
+        self.assertFalse(e["disponible"])
+        self.assertIn("0 chauffe exploitable, il en faut 12", e["raison"])
+
+    def test_ballon_hors_de_la_plage_connue(self):
+        """Le retour d'absence : bien plus froid que tout ce qui a été vu."""
+        _droite()
+        for temperature in (30.0, 43.9, 56.1, 62.0):
+            with self.subTest(temperature=temperature):
+                e = modele.estimation(temperature)
+                self.assertFalse(e["disponible"])
+                self.assertIn("hors de la plage connue (45 à 55 °C)", e["raison"])
+
+    def test_la_marge_tolere_un_degre(self):
+        _droite()
+        self.assertTrue(modele.estimation(44.0)["disponible"])
+        self.assertTrue(modele.estimation(56.0)["disponible"])
+        set_setting("modele_marge_degres", "0", module=api.MODULE)
+        self.assertFalse(modele.estimation(44.0)["disponible"])
+
+    def test_temperature_inconnue(self):
+        _droite()
+        with mock.patch.object(api, "get_status_cached", return_value=(None, None, "")):
+            e = modele.estimation()
+        self.assertFalse(e["disponible"])
+        self.assertEqual(e["raison"], "température du ballon inconnue")
+
+    def test_temperature_lue_dans_le_statut(self):
+        _droite()
+        with mock.patch.object(api, "get_status_cached",
+                               return_value=({"temperature": "52.0"}, None, "")):
+            e = modele.estimation()
+        self.assertEqual((e["temperature"], e["duree_min"]), (52.0, 44))
+
+    def test_la_duree_reste_dans_les_bornes(self):
+        _droite()
+        set_setting("modele_duree_max", "40", module=api.MODULE)
+        e = modele.estimation(46.0)      # la droite donne 62 min
+        self.assertEqual((e["duree_min"], e["bornee"]), (40, True))
+        self.assertEqual(e["besoin_kwh"], 1.6)
+        set_setting("modele_duree_min", "55", module=api.MODULE)
+        set_setting("modele_duree_max", "120", module=api.MODULE)
+        e = modele.estimation(54.0)      # la droite donne 38 min
+        self.assertEqual((e["duree_min"], e["bornee"]), (55, True))
+
+    def test_seules_les_bonnes_chauffes_apprennent(self):
+        """Chauffes à la main, avec eau tirée, trop courtes ou non mesurées :
+        enregistrées, mais sans effet sur la droite."""
+        _droite()
+        _chauffe(20, 25.0, 170.0, planifiee=False)   # veille d'un retour d'absence
+        _chauffe(21, 48.0, 110.0, tirage=True)       # douche pendant la chauffe
+        _chauffe(22, 64.0, 90.0)                     # 1 °C gagné : pas une chauffe
+        _chauffe(23, 50.0, 90.0, energie_wh=0.0)     # puissance non relevée
+        _chauffe(24, 50.0, 90.0, fin=None)           # encore en cours
+        m = modele.modele()
+        self.assertEqual(m["nombre"], 15)
+        self.assertAlmostEqual(m["pente"], -3.0, places=2)
+        self.assertEqual(m["temp_min"], 45.0)
+
+    def test_les_chauffes_d_avant_le_champ_planifiee_sont_gardees(self):
+        for i in range(15):
+            temperature = 45.0 + 10.0 * i / 14
+            _chauffe(i, temperature, 200 - 3 * temperature, planifiee=None)
+        self.assertTrue(modele.modele()["fiable"])
+
+    def test_sans_duree_estimee_la_duree_relevee_sert(self):
+        for i in range(15):
+            temperature = 45.0 + 10.0 * i / 14
+            duree = round(200 - 3 * temperature)
+            _chauffe(i, temperature, duree, duree_estimee_min=None)
+        m = modele.modele()
+        self.assertTrue(m["fiable"])
+        self.assertAlmostEqual(m["pente"], -3.0, places=1)
+
+    def test_seules_les_dernieres_chauffes_comptent(self):
+        """La fenêtre glisse : c'est ce qui fait suivre la saison."""
+        for i in range(25):                           # anciennes, deux fois plus longues
+            temperature = 45.0 + 10.0 * i / 24
+            _chauffe(i, temperature, 2 * (200 - 3 * temperature))
+        _droite(nombre=25, premier_jour=30)           # récentes
+        m = modele.modele()
+        self.assertEqual(m["nombre"], 25)
+        self.assertAlmostEqual(m["pente"], -3.0, places=2)
+        set_setting("modele_chauffes_max", "50", module=api.MODULE)
+        self.assertEqual(modele.modele()["nombre"], 50)
+
+    def test_une_droite_qui_monte_n_est_pas_un_modele(self):
+        for i in range(15):
+            _chauffe(i, 45.0 + i, 30.0 + i)           # plus chaud, plus long : absurde
+        e = modele.estimation(50.0)
+        self.assertFalse(e["disponible"])
+        self.assertIn("ne baisse pas quand le ballon part plus chaud", e["raison"])
+
+    def test_toutes_les_chauffes_a_la_meme_temperature(self):
+        for i in range(15):
+            _chauffe(i, 50.0, 45.0 + i % 3)
+        e = modele.estimation(50.0)
+        self.assertFalse(e["disponible"])
+        self.assertIn("même température", e["raison"])
+
+    def test_reglage_illisible_le_defaut_tient(self):
+        set_setting("modele_chauffes_min", "douze", module=api.MODULE)
+        self.assertEqual(modele.reglage("modele_chauffes_min"), 12)
+
+    def test_infos_publiees(self):
+        from .fonctions import info
+
+        _droite()
+        with mock.patch.object(api, "get_status_cached",
+                               return_value=({"temperature": 50.0}, None, "")):
+            self.assertEqual(info.estimation_chauffe()["duree_min"], 50)
+            self.assertEqual(info.duree_chauffe_estimee(), 50)
+            self.assertEqual(info.energie_chauffe_estimee(), 2.0)
+        with mock.patch.object(api, "get_status_cached",
+                               return_value=({"temperature": 20.0}, None, "")):
+            self.assertIsNone(info.duree_chauffe_estimee())
+            self.assertIsNone(info.energie_chauffe_estimee())
+
+    def test_l_info_est_proposee_aux_liaisons(self):
+        from . import conf
+
+        entree = next(i for i in conf.INFOS if i["nom"] == "estimation_chauffe")
+        self.assertEqual(entree["type"], "objet")
+        self.assertEqual(entree["fonction"], "fonctions.info.estimation_chauffe")
 
 
 class LiaisonBranchee(TestCase):
@@ -321,6 +675,40 @@ class OngletDuSuivi(TestCase):
         self.assertContains(page, "il en faut 3 pour")
         self.assertNotContains(page, "La prévision est")
         self.assertNotIn("suivi_erreur", page.context)
+
+    def test_estimation_affichee(self):
+        _droite()
+        with mock.patch.object(api, "get_status_cached",
+                               return_value=({"temperature": 50.0}, None, "")):
+            page = self.client.get(self.URL)
+
+        self.assertContains(page, "Prochaine chauffe, d'après la température du ballon")
+        self.assertContains(page, "50 min")
+        self.assertContains(page, "2,00 kWh")
+        self.assertContains(page, "15 chauffes parties à l'heure prévue")
+        self.assertNotIn("erreur", page.context["suivi"]["modele"])
+
+    def test_pas_d_estimation_la_raison_est_dite(self):
+        page = self._page()
+        self.assertContains(page, "Pas d'estimation")
+        self.assertContains(page, "0 chauffe exploitable, il en faut 12")
+
+    def test_le_tableau_montre_la_duree_reelle(self):
+        with _besoins():
+            _chauffer_par_paliers(a(13, 30))
+        page = self._page()
+        self.assertContains(page, "55 min")
+        self.assertContains(page, "(relevé 60)")
+
+    def test_les_reglages_du_modele_s_enregistrent(self):
+        self.client.post(self.URL, {
+            "action": "params", "modele_chauffes_max": "15", "modele_chauffes_min": "8",
+            "modele_duree_min": "20", "modele_duree_max": "90", "modele_marge_degres": "0",
+        })
+        self.assertEqual(modele.reglages(), {
+            "modele_chauffes_max": 15, "modele_chauffes_min": 8, "modele_duree_min": 20,
+            "modele_duree_max": 90, "modele_marge_degres": 0,
+        })
 
     def test_verdict_et_ou_corriger(self):
         with _besoins():

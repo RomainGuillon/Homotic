@@ -54,6 +54,18 @@ BESOINS = [
                 "(et les machines ne sont pas comparées aux heures creuses)",
     },
     {
+        # Durée et énergie de la chauffe du jour, estimées par qui connaît le
+        # ballon (sa température, ses chauffes passées). Le fournisseur peut
+        # se taire — trop peu de mesures, ballon hors de ce qu'il a déjà vu :
+        # ce module retombe alors de lui-même sur ses réglages.
+        "nom": "estimation_chauffe",
+        "libelle": "Estimation de la chauffe (durée, énergie)",
+        "type": "objet",
+        "obligatoire": False,
+        "sans": "durée de chauffe selon la saison (été / hiver) et consommation "
+                "saisie dans les réglages, quelle que soit la température du ballon",
+    },
+    {
         # Ne sert qu'aux machines, switch « Optimisé » sur off : une machine
         # qui n'a plus de place aujourd'hui est-elle moins chère demain ?
         "nom": "prevision_pv_demain",

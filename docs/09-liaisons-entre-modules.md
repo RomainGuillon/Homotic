@@ -145,6 +145,7 @@ Liaisons — Heure de démarrage
 | `solcast` | `creneau_chauffe` | `objet` | `heure_demarrage.creneau_retenu` | Surligner le créneau sur la courbe du jour |
 | `chauffe_eau` | `heure_chauffe_prevue` | `valeur` | `heure_demarrage.heure_demarrage` | Passer à la relève à la minute autour de la chauffe attendue |
 | `chauffe_eau` | `prevision_chauffe` | `objet` | `heure_demarrage.creneau_retenu` | Comparer chaque chauffe mesurée à ce qui était prévu (durée, énergie) |
+| `heure_demarrage` | `estimation_chauffe` | `objet` | `chauffe_eau.estimation_chauffe` | Placer une chauffe de la durée et de l'énergie que demande le ballon aujourd'hui, au lieu d'une durée fixe par saison |
 
 Le cycle disparaît : plus aucun module n'en importe un autre, tout passe par
 le socle.
@@ -154,6 +155,15 @@ directement sous forme de besoin. Il réutilise un objet déjà publié —
 `creneau_retenu`, qui surligne aussi la courbe solaire — en lui ajoutant une
 clé, `besoin_kwh`. Ajouter une clé à un objet publié ne casse aucun
 consommateur ; en renommer ou en retirer une, si.
+
+`estimation_chauffe` ferme une boucle sans créer de cycle : le calcul de
+l'heure lit l'estimation du chauffe-eau, le chauffe-eau lit le créneau
+retenu par le calcul pour le comparer au réel. Aucun des deux n'appelle
+l'autre en cascade — chacun lit une valeur déjà mémorisée (le dernier
+calcul d'un côté, les chauffes mesurées et le cache du ballon de l'autre).
+C'est aussi l'exemple d'un besoin dont le **silence est une réponse** : le
+fournisseur dit qu'il ne sait pas et pourquoi, et le consommateur retombe
+sur ses réglages.
 
 ### Forme des objets échangés
 
@@ -180,6 +190,15 @@ mieux qu'un import.
 # que le calcul a comptés pour la chauffe.
 {"heure": "13:30", "duree_min": 60, "besoin_kwh": 2.5, "mode": "solaire",
  "forcee": False, "perime": False}
+
+# estimation_chauffe — ce que demanderait une chauffe qui partirait
+# maintenant. Toujours un objet, même quand il n'y a pas d'estimation :
+# disponible vaut alors False, duree_min et besoin_kwh valent None, et
+# raison dit pourquoi (« ballon à 38 °C, hors de la plage connue… »).
+# temperature : celle du ballon qui a servi ; chauffes : combien de chauffes
+# ont réglé le modèle ; bornee : la durée a été ramenée à une borne réglée.
+{"disponible": True, "duree_min": 46, "besoin_kwh": 1.84,
+ "temperature": 50.0, "chauffes": 25, "bornee": False, "raison": ""}
 ```
 
 Un fournisseur qui ne peut pas répondre renvoie `None` (Tempo sans couleur

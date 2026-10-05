@@ -365,9 +365,11 @@ This is deliberate: the calculation only keeps **future** slots, so an info that
 
 **The `heure_demarrage_chauffe_eau` variable is authoritative.** It is written by `recalculer`, editable by hand in Configuration, and takes precedence over the stored calculation: if the two differ, the interface shows the forced time with a note saying so.
 
+**Duration and energy of the cycle.** The calculation places a heating cycle of a given duration that needs a given energy. Both come from the **Estimation de la chauffe** need when it is connected (Configuration → Liaisons) and answers: the Water heater module estimates them from the tank temperature — see *Estimating the next cycle* below. The tab and the Journal then say "estimée, ballon à 49,5 °C". In every other case the module **settings** are used, as before: `temp_chauffe_ete` or `temp_chauffe_hiver` for the duration, `conso_chauffe_eau` for the energy. That is the fallback when the need is not connected, and also when the provider prefers to stay silent (too few measured cycles, a tank colder than anything it has seen) — the screen then gives the reason.
+
 Season: the **Hiver** switch decides. If it is off — whether "Été" is on or both are off — it is **summer**, hence the short heating duration. No automatic switching by date.
 
-Infos useful in conditions: `heure_demarrage`, `mode_retenu`, `calcul_du_jour` (is the last calculation from today?), `heure_calcul`, `gain_estime_eur`, `surplus_creneau_kwh`.
+Infos useful in conditions: `heure_demarrage`, `mode_retenu`, `duree_chauffe_min` (the one from today's calculation), `calcul_du_jour` (is the last calculation from today?), `heure_calcul`, `gain_estime_eur`, `surplus_creneau_kwh`.
 
 ## Tempo
 
@@ -388,6 +390,20 @@ When a cycle starts around the planned time (from ten minutes before to twenty m
 The **Prévu contre réel** block averages the last twenty compared cycles and, from three onwards, gives a verdict: forecast **accurate** (average gap within ± 10 %), **too high** or **too low**. The *average* gap is what counts: a single cycle always deviates, depending on how much hot water was drawn the day before; an error in the same direction cycle after cycle points to a setting to revise — `conso_chauffe_eau` for the energy, `temp_chauffe_ete` and `temp_chauffe_hiver` for the duration, in the Start time tab.
 
 A row stays at "—" when the cycle started outside the planned time (an evening boost, the tank restarting on its own), when it predates this comparison, or when the **Prévision de la chauffe** need is not connected under Configuration → Liaisons.
+
+**The duration shown is an estimated end of heating.** The Cozytouch gateway only pushes the tank state every ten minutes or so: the stop is seen up to ten minutes late, and a 44-minute cycle would be recorded as 50 minutes, 2.0 kWh instead of 1.76. When a cycle closes, the log locates the real stop from the rise of the bottom-of-tank temperature and integrates the energy only up to that point. The duration as read stays in brackets. A row marked **eau tirée** is a cycle during which the bottom of the tank cooled down: hot water was drawn, so it lasted longer.
+
+### Estimating the next cycle
+
+This is what the log is for: knowing what today's cycle will need, instead of a fixed duration per season. The element heats at constant power, so energy follows duration, and duration follows the starting temperature — on the measurements, a straight line of roughly 3 more minutes per degree less.
+
+The **Prochaine chauffe, d'après la température du ballon** block shows what that line announces for a cycle starting now. The same estimate is published to other modules (info `estimation_chauffe`) and to scenarios (`duree_chauffe_estimee`, `energie_chauffe_estimee`).
+
+**The line is re-learned continuously** on the latest cycles (25 by default), so it follows the season without any setting. **Only some cycles teach it**: those started at the planned time, with no water drawn along the way. A cycle started by hand the day before returning from an absence, or the tank restarting in "always full" mode, is measured and shown but does not shape the line.
+
+**The estimate would rather stay silent than guess.** It is unavailable — and the block says why — with fewer than 12 usable cycles, when the tank is outside the range of starting temperatures already seen (within 1 °C; typically a return from absence), when the tank temperature is unknown, or when the line does not slope down. The module reading it then falls back on its own settings: at worst, the fixed-duration behaviour. When it does answer, the duration stays between two bounds (15 and 120 minutes by default). These thresholds are set in the tab's parameters, under *Estimation de la durée de chauffe*.
+
+What the estimate does not know: it starts from the temperature read **at calculation time**. If water is drawn between the calculation and the cycle, the tank will start colder; the *Prévu contre réel* block shows it as a forecast that is regularly too low.
 
 # Creating a module
 

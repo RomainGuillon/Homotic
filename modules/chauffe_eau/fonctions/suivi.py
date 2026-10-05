@@ -39,6 +39,13 @@ enregistrée avec ce que la prévision annonçait pour elle (durée, énergie),
 lu par le besoin ``prevision_chauffe``. À la clôture, l'écart entre les
 deux dit si la prévision était bonne ; ``bilan_prevision`` en fait la
 moyenne sur les dernières chauffes, pour savoir dans quel sens la corriger.
+
+Fin de chauffe : la passerelle ne repousse l'état du ballon que toutes les
+dix minutes, l'arrêt est donc vu en retard. À la clôture, la durée réelle
+est estimée et l'énergie intégrée jusque-là seulement (``releves.py``).
+C'est aussi là qu'on note si de l'eau a été tirée en cours de chauffe, et
+au démarrage si la chauffe part à l'heure prévue : le modèle de durée
+(``modele.py``) n'apprend que des chauffes planifiées et sans tirage.
 """
 
 from datetime import datetime, timedelta
@@ -48,7 +55,7 @@ from django.utils import timezone
 from core.models import LogEntry
 from core.services import get_setting, journal
 
-from . import api
+from . import api, releves as lecture
 
 MODULE = "chauffe_eau"
 
@@ -219,6 +226,11 @@ def tache_suivi():
             debut=maintenant,
             temp_debut=mesures["temp_milieu"],
             consigne=mesures["consigne"],
+            # Autour de l'heure prévue : c'est une chauffe que le calcul
+            # avait à prévoir, elle pourra régler le modèle de durée.
+            planifiee=bool(prevu.get("prevu_heure")) or dans_fenetre_de_guet(
+                timezone.localtime(maintenant)
+            ),
             **prevu,
         )
         annonce = ""
@@ -245,28 +257,28 @@ def _cloturer(session, mesures, maintenant):
     """Clôt une chauffe et calcule son bilan énergétique."""
     from ..models import ChauffeMesure
 
-    releves = list(session.mesures.order_by("quand"))
-    # Intégration : chaque relevé vaut pour l'intervalle qui le sépare du
-    # suivant. Un trou (serveur arrêté) ne crée donc pas d'énergie fictive
-    # au-delà de 5 minutes.
-    elec_wh = pac_wh = 0.0
-    for courant, suivant in zip(releves, releves[1:]):
-        heures = (suivant.quand - courant.quand).total_seconds() / 3600.0
-        heures = min(heures, 5 / 60.0)
-        elec_wh += (courant.puissance_elec or 0.0) * heures
-        pac_wh += (courant.puissance_pac or 0.0) * heures
+    # L'arrêt vient d'être vu, mais il a eu lieu avant : la passerelle ne
+    # rafraîchit le ballon que toutes les dix minutes. On estime la fin
+    # réelle, et l'énergie n'est intégrée que jusque-là.
+    lu = lecture.bilan(session.mesures.order_by("quand"), session.debut)
 
     session.fin = maintenant
     session.temp_fin = mesures["temp_milieu"]
     session.duree_min = max(1, round((maintenant - session.debut).total_seconds() / 60))
-    session.energie_elec_wh = round(elec_wh, 1)
-    session.energie_pac_wh = round(pac_wh, 1)
-    session.energie_wh = round(elec_wh + pac_wh, 1)
+    session.duree_estimee_min = lu["duree_estimee_min"]
+    session.tirage = lu["tirage"]
+    session.energie_elec_wh = lu["elec_wh"]
+    session.energie_pac_wh = lu["pac_wh"]
+    session.energie_wh = round(lu["elec_wh"] + lu["pac_wh"], 1)
     session.save()
 
     detail = ""
+    if session.duree_estimee_min is not None:
+        detail += f" — arrêt réel estimé à {session.duree_estimee_min:.0f} min"
+    if session.tirage:
+        detail += " — eau tirée pendant la chauffe"
     if session.wh_par_degre:
-        detail = f" — {session.delta_temp} °C gagnés, {session.wh_par_degre} Wh/°C"
+        detail += f" — {session.delta_temp} °C gagnés, {session.wh_par_degre} Wh/°C"
     if session.ecart_wh is not None:
         detail += (
             f" — prévu {session.prevu_wh:.0f} Wh : écart {session.ecart_wh:+.0f} Wh "
@@ -384,7 +396,7 @@ def bilan_prevision():
     durees = [s for s in comparees if s.prevu_duree_min]
     if durees:
         duree_prevue = _moyenne([s.prevu_duree_min for s in durees])
-        duree_reelle = _moyenne([s.duree_min for s in durees])
+        duree_reelle = _moyenne([s.duree_reelle_min for s in durees])
         bilan.update({
             "duree_prevue_min": round(duree_prevue),
             "duree_reelle_min": round(duree_reelle),
@@ -428,7 +440,8 @@ def resume():
     # donc proportionnelle au nombre de degrés à gagner. C'est cette pente
     # (min/°C) qui permettra de viser une heure de FIN de chauffe.
     minutes_deg = [
-        s.duree_min / s.delta_temp for s in exploitables if s.delta_temp and s.delta_temp > 0
+        s.duree_reelle_min / s.delta_temp
+        for s in exploitables if s.delta_temp and s.delta_temp > 0
     ]
     theorique, litres = wh_par_degre_theorique()
 
@@ -452,4 +465,19 @@ def resume():
         "dernieres": dernieres,
         "bilan": bilan_prevision(),
         "fournisseur_prevision": _fournisseur_prevision(),
+        "modele": _modele_pour_l_onglet(),
     }
+
+
+def _modele_pour_l_onglet():
+    """Le modèle de durée et son estimation du moment, ou une erreur lisible.
+
+    Ne lève jamais : le modèle est un plus, il ne doit pas coûter
+    l'affichage du suivi.
+    """
+    try:
+        from . import modele
+
+        return {"modele": modele.modele(), "estimation": modele.estimation()}
+    except Exception as exc:
+        return {"erreur": str(exc)}

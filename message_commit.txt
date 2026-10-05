@@ -1,32 +1,54 @@
-Chauffe-eau : chaque chauffe est comparée à ce qui était prévu
+Chauffe-eau : durée de chauffe estimée d'après la température du ballon
 
-Le suivi mesurait l'énergie et la durée de chaque chauffe, mais rien ne
-disait si le calcul de l'heure de démarrage avait vu juste : son besoin
-(conso_chauffe_eau) et sa durée restaient des valeurs saisies à la main,
-jamais confrontées au réel.
+Le calcul de l'heure plaçait une chauffe de durée fixe par saison (60 ou
+90 min) pour une consommation saisie à la main. Les 71 chauffes mesurées
+depuis juillet montrent que la durée suit la température de départ, sur
+une droite : rejouée chauffe après chauffe sur cet historique, elle prédit
+la durée à 3,8 min près (95 % des chauffes à ± 10 min) et l'énergie à
+0,15 kWh près, là où les réglages fixes se trompent de 19 min et 0,75 kWh.
 
-- suivi : une chauffe qui démarre dans la fenêtre de l'heure prévue fige
-  la prévision du moment (heure, durée, énergie) sur sa ChauffeSession.
-  Figée au démarrage, pas relue à la clôture : un recalcul en cours de
-  chauffe ne la change pas. Une chauffe partie ailleurs (boost, relance
-  du ballon) reste sans prévision, donc hors comparaison.
-- ChauffeSession : prevu_heure, prevu_duree_min, prevu_wh (migration
-  chauffe_eau 0002) ; écarts « réel − prévu » en Wh, en % et en minutes.
-- onglet : colonnes Prévu et Écart dans le tableau de suivi, et un bloc
-  « Prévu contre réel » — moyenne des 20 dernières chauffes comparées,
-  verdict à partir de 3 (juste à ± 10 %, trop haute, trop basse).
-- journal : la ligne « Fin de chauffe » porte le prévu et l'écart.
-- liaison : nouveau besoin chauffe_eau.prevision_chauffe, branché par la
-  migration core 0014 sur heure_demarrage.creneau_retenu là où l'heure de
-  chauffe vient déjà de ce module. creneau_retenu gagne la clé besoin_kwh
-  (l'énergie du calcul ; le réglage si aucun calcul n'a eu lieu).
-- docs : « Suivi des chauffes : prévu contre réel » (FR, EN, DE) et la
-  forme de creneau_retenu dans les liaisons — les .docx ne sont pas
-  régénérés.
+Suivi des chauffes
+- fin de chauffe estimée : la passerelle ne repousse l'état du ballon que
+  toutes les dix minutes, l'arrêt était donc vu en retard et la durée
+  arrondie à la dizaine supérieure. À la clôture, l'arrêt réel est situé
+  d'après la montée du bas de cuve (champ duree_estimee_min) et l'énergie
+  n'est intégrée que jusque-là. La durée relevée reste affichée ;
+- eau tirée pendant la chauffe (le bas de cuve redescend) : champ tirage ;
+- chauffe partie autour de l'heure prévue ou non : champ planifiee ;
+- migration 0003 : ajoute les trois champs et relit les chauffes dont les
+  relevés minute existent encore (durée estimée, énergie, tirage). Une
+  chauffe coupée par la purge des 60 jours est laissée telle quelle.
 
-Les chauffes déjà enregistrées n'ont pas de prévision : la comparaison
-commence à la première chauffe qui suit le déploiement.
+Modèle de durée (fonctions/modele.py)
+- droite durée = f(température de départ), réapprise à chaque lecture sur
+  les 25 dernières chauffes planifiées et sans eau tirée ; l'énergie se
+  déduit de la puissance de chauffe constatée ;
+- il se tait plutôt que de deviner : moins de 12 chauffes, ballon hors de
+  la plage des départs déjà vus (à 1 °C près), température inconnue,
+  droite qui ne descend pas. Quand il répond, la durée reste entre deux
+  bornes (15 et 120 min) ;
+- ces cinq seuils se règlent dans le paramétrage de l'onglet ;
+- nouvelles infos : estimation_chauffe (objet, pour les liaisons),
+  duree_chauffe_estimee et energie_chauffe_estimee (pour les scénarios) ;
+- l'onglet montre l'estimation du moment, ou la raison de son absence.
 
-Tests : 20 dans modules/chauffe_eau/tests.py (nouveau), 3 de plus dans
-modules/heure_demarrage/tests.py, 137 au total. Ceux du chauffe-eau sont
-sautés si le module n'est pas activé dans la base (tables absentes).
+Heure de démarrage
+- nouveau besoin estimation_chauffe : quand il est branché et qu'il
+  répond, la durée et l'énergie de la chauffe viennent de lui. Dans tous
+  les autres cas (non branché, fournisseur muet ou en panne, annonce
+  inutilisable), les réglages de saison servent comme avant, et le détail
+  du calcul dit pourquoi ;
+- migration core 0016 : branche le besoin sur
+  chauffe_eau.estimation_chauffe là où le chauffe-eau lit déjà sa
+  prévision chez ce module. Pour revenir aux durées fixes : débrancher le
+  besoin dans Configuration → Liaisons ;
+- l'info duree_chauffe_min rend la durée du calcul du jour (estimée ou
+  de saison), et non plus toujours celle de la saison ;
+- carte Saison : la phrase annonçant une bascule automatique par la date
+  était fausse (seul le switch Hiver décide), elle est corrigée.
+
+Non modifié : l'estimation du ballon de demain dans le plan des machines
+garde les réglages de saison.
+
+Documentation (FR, EN, DE) : sections Heure de démarrage, Suivi des
+chauffes, « Estimer la prochaine chauffe » et liaisons.

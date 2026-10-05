@@ -365,9 +365,11 @@ Das ist Absicht: Die Berechnung berücksichtigt nur **künftige** Zeitfenster, s
 
 **Maßgeblich ist die Variable `heure_demarrage_chauffe_eau`.** Sie wird von `recalculer` geschrieben, ist in der Konfiguration von Hand änderbar und hat Vorrang vor der gespeicherten Berechnung: Weichen beide voneinander ab, zeigt die Oberfläche die erzwungene Uhrzeit mit einem entsprechenden Hinweis.
 
+**Dauer und Energie der Aufheizung.** Die Berechnung plant eine Aufheizung bestimmter Dauer ein, die eine bestimmte Energie benötigt. Beide stammen aus dem Bedarf **Estimation de la chauffe**, wenn er verbunden ist (Configuration → Liaisons) und antwortet: Das Modul Warmwasser schätzt sie anhand der Speichertemperatur — siehe *Die nächste Aufheizung schätzen* weiter unten. Reiter und Journal melden dann „estimée, ballon à 49,5 °C". In allen anderen Fällen gelten wie bisher die **Einstellungen** des Moduls: `temp_chauffe_ete` oder `temp_chauffe_hiver` für die Dauer, `conso_chauffe_eau` für die Energie. Das ist der Rückfall, wenn der Bedarf nicht verbunden ist, und auch dann, wenn der Lieferant lieber schweigt (zu wenige gemessene Aufheizungen, Speicher kälter als alles bisher Gesehene) — die Oberfläche nennt dann den Grund.
+
 Jahreszeit: Der Schalter **Hiver** entscheidet. Ist er aus — ob „Été" nun an ist oder beide aus sind — gilt **Sommer**, also die kurze Aufheizdauer. Kein automatischer Wechsel nach Datum.
 
-In Bedingungen nützliche Infos: `heure_demarrage`, `mode_retenu`, `calcul_du_jour` (stammt die letzte Berechnung von heute?), `heure_calcul`, `gain_estime_eur`, `surplus_creneau_kwh`.
+In Bedingungen nützliche Infos: `heure_demarrage`, `mode_retenu`, `duree_chauffe_min` (die der heutigen Berechnung), `calcul_du_jour` (stammt die letzte Berechnung von heute?), `heure_calcul`, `gain_estime_eur`, `surplus_creneau_kwh`.
 
 ## Tempo
 
@@ -388,6 +390,20 @@ Beginnt eine Aufheizung rund um die geplante Uhrzeit (von zehn Minuten davor bis
 Der Block **Prévu contre réel** mittelt die letzten zwanzig verglichenen Aufheizungen und fällt ab drei ein Urteil: Prognose **zutreffend** (mittlere Abweichung innerhalb von ± 10 %), **zu hoch** oder **zu niedrig**. Entscheidend ist die *mittlere* Abweichung: Eine einzelne Aufheizung weicht immer ab, je nachdem, wie viel Warmwasser am Vortag entnommen wurde; ein Fehler in dieselbe Richtung, Aufheizung für Aufheizung, weist auf eine Einstellung hin, die anzupassen ist — `conso_chauffe_eau` für die Energie, `temp_chauffe_ete` und `temp_chauffe_hiver` für die Dauer, im Reiter Startzeit.
 
 Eine Zeile bleibt bei „—", wenn die Aufheizung außerhalb der geplanten Uhrzeit begonnen hat (ein Boost am Abend, ein selbstständiges Nachheizen des Speichers), wenn sie älter ist als dieser Vergleich oder wenn der Bedarf **Prévision de la chauffe** unter Configuration → Liaisons nicht verbunden ist.
+
+**Die angezeigte Dauer ist ein geschätztes Ende der Aufheizung.** Das Cozytouch-Gateway meldet den Zustand des Speichers nur etwa alle zehn Minuten: Das Abschalten wird daher bis zu zehn Minuten zu spät gesehen, und eine Aufheizung von 44 Minuten würde mit 50 Minuten erfasst, mit 2,0 kWh statt 1,76. Beim Abschluss bestimmt die Aufzeichnung das tatsächliche Ende aus dem Anstieg der Temperatur am Speicherboden und integriert die Energie nur bis dorthin. Die abgelesene Dauer bleibt in Klammern stehen. Eine mit **eau tirée** markierte Zeile ist eine Aufheizung, während der der Speicherboden wieder abgekühlt ist: Es wurde Warmwasser entnommen, sie hat deshalb länger gedauert.
+
+### Die nächste Aufheizung schätzen
+
+Dafür ist die Aufzeichnung da: zu wissen, was die heutige Aufheizung braucht, statt einer festen Dauer je Jahreszeit. Der Heizstab heizt mit konstanter Leistung, die Energie folgt also der Dauer, und die Dauer folgt der Starttemperatur — in den Messungen eine Gerade von rund 3 Minuten mehr je Grad weniger.
+
+Der Block **Prochaine chauffe, d'après la température du ballon** zeigt, was diese Gerade für eine jetzt startende Aufheizung ankündigt. Dieselbe Schätzung wird für andere Module (Info `estimation_chauffe`) und für Szenarien (`duree_chauffe_estimee`, `energie_chauffe_estimee`) veröffentlicht.
+
+**Die Gerade wird laufend neu gelernt**, aus den letzten Aufheizungen (standardmäßig 25); sie folgt der Jahreszeit also ohne Einstellung. **Nur bestimmte Aufheizungen fließen ein**: jene, die zur geplanten Uhrzeit begonnen haben und bei denen kein Wasser entnommen wurde. Eine von Hand gestartete Aufheizung am Vortag der Rückkehr aus einer Abwesenheit oder ein Nachheizen im Modus „immer voll" wird gemessen und angezeigt, formt die Gerade aber nicht.
+
+**Die Schätzung schweigt lieber, als zu raten.** Sie ist nicht verfügbar — und der Block nennt den Grund — bei weniger als 12 verwertbaren Aufheizungen, wenn der Speicher außerhalb des Bereichs der bereits gesehenen Starttemperaturen liegt (auf 1 °C genau; typischerweise nach einer Abwesenheit), wenn die Speichertemperatur unbekannt ist oder wenn die Gerade nicht abfällt. Das lesende Modul greift dann auf seine eigenen Einstellungen zurück: schlimmstenfalls das Verhalten mit fester Dauer. Antwortet sie, bleibt die Dauer zwischen zwei Grenzen (standardmäßig 15 und 120 Minuten). Diese Schwellen werden in den Parametern des Reiters eingestellt, unter *Estimation de la durée de chauffe*.
+
+Was die Schätzung nicht weiß: Sie geht von der Temperatur **zum Zeitpunkt der Berechnung** aus. Wird zwischen Berechnung und Aufheizung Wasser entnommen, startet der Speicher kälter; der Block *Prévu contre réel* zeigt das als regelmäßig zu niedrige Prognose.
 
 # Ein Modul erstellen
 

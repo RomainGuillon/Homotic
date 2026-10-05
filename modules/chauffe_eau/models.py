@@ -35,6 +35,24 @@ class ChauffeSession(models.Model):
     energie_elec_wh = models.FloatField("dont résistance (Wh)", default=0.0)
     duree_min = models.IntegerField("durée (min)", default=0)
 
+    # La passerelle ne repousse l'état du ballon que toutes les dix minutes :
+    # l'arrêt est donc vu en retard, et ``duree_min`` (du début au relevé de
+    # clôture) arrondit la chauffe à la dizaine supérieure. Durée réelle
+    # estimée à la clôture d'après la montée du bas de cuve — vide quand
+    # elle n'a pas pu l'être (voir fonctions/releves.py). Les énergies
+    # ci-dessus sont intégrées jusqu'à cette fin estimée.
+    duree_estimee_min = models.FloatField("durée estimée (min)", null=True, blank=True)
+    # De l'eau a été tirée pendant la chauffe (le bas de cuve est
+    # redescendu) : elle a duré plus longtemps que sa température de départ
+    # ne le laissait prévoir, le modèle de durée l'écarte.
+    tirage = models.BooleanField("eau tirée pendant la chauffe", default=False)
+    # Partie autour de l'heure prévue par le calcul ? Seules celles-là
+    # règlent le modèle de durée : une chauffe lancée à la main (veille d'un
+    # retour d'absence) ou une relance du ballon n'est pas ce que le calcul
+    # aura à prévoir. Vide pour les chauffes antérieures à ce champ, que le
+    # modèle garde faute de pouvoir les distinguer.
+    planifiee = models.BooleanField("partie à l'heure prévue", null=True, blank=True)
+
     # Ce que la prévision annonçait pour cette chauffe, figé à son
     # démarrage : la prévision peut être refaite dans la journée, et c'est
     # celle qui a lancé la chauffe qu'on veut juger. Vides pour une chauffe
@@ -52,6 +70,27 @@ class ChauffeSession(models.Model):
 
     def __str__(self):
         return f"{self.debut:%d/%m %H:%M} — {self.duree_min} min, {self.energie_wh:.0f} Wh"
+
+    @property
+    def duree_reelle_min(self):
+        """Durée de la chauffe : l'estimée si elle existe, sinon la relevée."""
+        if self.duree_estimee_min is not None:
+            return self.duree_estimee_min
+        return self.duree_min
+
+    @property
+    def apprend(self):
+        """Vrai si cette chauffe peut régler le modèle de durée.
+
+        Terminée, mesurée, d'au moins 2 °C, partie à l'heure prévue (ou
+        avant qu'on sache le dire) et sans eau tirée en cours de route.
+        """
+        delta = self.delta_temp
+        return bool(
+            self.fin and self.energie_wh and delta and delta >= 2.0
+            and not self.tirage and self.planifiee is not False
+            and self.duree_reelle_min and self.duree_reelle_min > 0
+        )
 
     @property
     def delta_temp(self):
@@ -102,7 +141,7 @@ class ChauffeSession(models.Model):
         """Minutes de chauffe en plus (+) ou en moins (−) du prévu."""
         if not self.fin or not self.prevu_duree_min:
             return None
-        return self.duree_min - self.prevu_duree_min
+        return round(self.duree_reelle_min - self.prevu_duree_min)
 
 
 class ChauffeMesure(models.Model):

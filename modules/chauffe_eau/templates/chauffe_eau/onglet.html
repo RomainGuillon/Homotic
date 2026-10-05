@@ -376,6 +376,48 @@
             </div>
           </div>
           <div class="row g-3 mb-4">
+            <div class="col-12">
+              <div class="fw-bold">Estimation de la durée de chauffe</div>
+              <div class="form-text mt-0">La durée et l'énergie de la prochaine chauffe sont
+                estimées d'après la température du ballon, sur une droite réapprise à
+                partir des dernières chauffes (voir « Suivi des chauffes » plus bas).
+                Ces réglages disent quand s'y fier.</div>
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label">Chauffes apprises</label>
+              <input type="number" name="modele_chauffes_max" class="form-control" min="2"
+                     value="{{ params.modele.modele_chauffes_max }}">
+              <div class="form-text">Nombre de chauffes récentes qui règlent la droite
+                (25 par défaut). Moins : elle suit plus vite la saison, mais une chauffe
+                atypique pèse davantage.</div>
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label">Minimum pour estimer</label>
+              <input type="number" name="modele_chauffes_min" class="form-control" min="2"
+                     value="{{ params.modele.modele_chauffes_min }}">
+              <div class="form-text">En dessous de ce nombre de chauffes exploitables
+                (12 par défaut), pas d'estimation.</div>
+            </div>
+            <div class="col-6 col-md-2">
+              <label class="form-label">Durée mini (min)</label>
+              <input type="number" name="modele_duree_min" class="form-control" min="1"
+                     value="{{ params.modele.modele_duree_min }}">
+            </div>
+            <div class="col-6 col-md-2">
+              <label class="form-label">Durée maxi (min)</label>
+              <input type="number" name="modele_duree_max" class="form-control" min="1"
+                     value="{{ params.modele.modele_duree_max }}">
+              <div class="form-text">Bornes de la durée estimée.</div>
+            </div>
+            <div class="col-6 col-md-2">
+              <label class="form-label">Marge (°C)</label>
+              <input type="number" name="modele_marge_degres" class="form-control" min="0"
+                     value="{{ params.modele.modele_marge_degres }}">
+              <div class="form-text">Tolérance autour des températures de départ déjà
+                vues. Au-delà, pas d'estimation.</div>
+            </div>
+          </div>
+          <div class="row g-3 mb-4">
             <div class="col-12 col-md-4">
               <label class="form-label">Absence — valeur du mode</label>
               <select name="mode_absence" class="form-select">
@@ -470,6 +512,49 @@
               {{ suivi.en_cours.temp_debut }} °C.
             </p>
           {% endif %}
+
+          {# --- Modèle de durée : ce que demanderait une chauffe maintenant --- #}
+          {% with mo=suivi.modele.modele es=suivi.modele.estimation %}
+            <div class="border rounded p-3 mb-3">
+              <div class="fw-bold mb-2"><i class="bi bi-thermometer-half me-2"></i>Prochaine chauffe, d'après la température du ballon</div>
+              {% if suivi.modele.erreur %}
+                <p class="text-danger small mb-0">Estimation indisponible : {{ suivi.modele.erreur }}</p>
+              {% else %}
+                {% if es.disponible %}
+                  <div class="row text-center g-2 mb-2">
+                    <div class="col-6 col-md-3">
+                      <div class="fs-5 fw-bold">{{ es.duree_min }} min</div>
+                      <div class="small text-secondary">durée estimée
+                        {% if es.bornee %}<br><span class="text-warning">ramenée à la borne réglée</span>{% endif %}</div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                      <div class="fs-5 fw-bold">{{ es.besoin_kwh|floatformat:2 }} kWh</div>
+                      <div class="small text-secondary">énergie estimée</div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                      <div class="fs-5 fw-bold">{{ es.temperature }} °C</div>
+                      <div class="small text-secondary">ballon en ce moment</div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                      <div class="fs-5 fw-bold">±&nbsp;{{ mo.erreur_min }} min</div>
+                      <div class="small text-secondary">écart moyen de la droite</div>
+                    </div>
+                  </div>
+                {% else %}
+                  <p class="small mb-2"><i class="bi bi-slash-circle text-warning me-1"></i>
+                    <strong>Pas d'estimation</strong> : {{ es.raison }}. Le module qui la lit
+                    retombe alors sur ses propres réglages.</p>
+                {% endif %}
+                {% if mo.pente != None %}
+                  <p class="small text-secondary mb-0">Droite apprise sur
+                    {{ mo.nombre }} chauffe{{ mo.nombre|pluralize }} parties à l'heure prévue,
+                    sans eau tirée : {{ mo.minutes_par_degre }} min de plus par degré en
+                    moins, pour des départs entre {{ mo.temp_min }} et {{ mo.temp_max }} °C,
+                    à {{ mo.puissance_w }} W.</p>
+                {% endif %}
+              {% endif %}
+            </div>
+          {% endwith %}
 
           {# --- Prévu contre réel : la prévision était-elle bonne ? --- #}
           {% with b=suivi.bilan %}
@@ -570,9 +655,15 @@
                       {% if s.prevu_heure %}
                         <br><span class="small text-secondary">prévue {{ s.prevu_heure }}</span>
                       {% endif %}
+                      {% if s.tirage %}
+                        <br><span class="small text-warning">eau tirée</span>
+                      {% endif %}
                     </td>
                     <td>
-                      {{ s.duree_min }} min
+                      {{ s.duree_reelle_min|floatformat:0 }} min
+                      {% if s.duree_estimee_min != None %}
+                        <span class="small text-secondary">(relevé {{ s.duree_min }})</span>
+                      {% endif %}
                       {% if s.ecart_duree_min != None %}
                         <br><span class="small text-secondary">prévu {{ s.prevu_duree_min }}
                           ({% if s.ecart_duree_min > 0 %}+{% endif %}{{ s.ecart_duree_min }})</span>
@@ -606,7 +697,10 @@
             </div>
             <p class="small text-secondary mt-2 mb-0">Écart = mesuré − prévu : positif, la
               chauffe a demandé plus que prévu. « — » : chauffe partie en dehors de l'heure
-              prévue (lancée à la main, relance du ballon), ou antérieure à la comparaison.</p>
+              prévue (lancée à la main, relance du ballon), ou antérieure à la comparaison.
+              Durée : la passerelle ne rafraîchit le ballon que toutes les dix minutes,
+              l'arrêt réel est donc estimé ; la durée relevée figure entre parenthèses.
+              « Eau tirée » : chauffe allongée par un tirage, écartée de l'estimation.</p>
           {% else %}
             <p class="text-secondary mb-0">Aucune chauffe enregistrée pour le moment.
               La première sera captée dès que le ballon se mettra à chauffer.</p>

@@ -14,7 +14,7 @@ from django.shortcuts import redirect, render
 
 from core.services import get_setting, journal, set_setting
 
-from ..fonctions import affichage, api
+from ..fonctions import affichage, api, modele
 
 
 def _save_params(request):
@@ -44,6 +44,16 @@ def _save_params(request):
         set_setting("suivi_minutes_veille", str(max(1, int(raw))), module=api.MODULE)
     except ValueError:
         pass
+
+    # Modèle de durée : fenêtre d'apprentissage et garde-fous. Seule la
+    # marge peut valoir zéro (« strictement la plage déjà vue »).
+    for champ in modele.REGLAGES:
+        raw = request.POST.get(champ, "").strip()
+        plancher = 0 if champ == "modele_marge_degres" else 1
+        try:
+            set_setting(champ, str(max(plancher, int(raw))), module=api.MODULE)
+        except ValueError:
+            pass
 
     for champ in ("douches_chauffe", "douches_veille"):
         raw = request.POST.get(champ, "").strip()
@@ -160,6 +170,7 @@ def onglet(request):
             "douches_veille": api.douches_veille(),
             "mode_absence": get_setting("mode_absence", module=api.MODULE, default=""),
             "capacites": get_setting("capacites", module=api.MODULE, default=""),
+            "modele": modele.reglages(),
         },
     }
 
