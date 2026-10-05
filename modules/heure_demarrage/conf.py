@@ -53,6 +53,17 @@ BESOINS = [
         "sans": "pas d'arbitrage coût jour/nuit, le créneau solaire est retenu tel quel "
                 "(et les machines ne sont pas comparées aux heures creuses)",
     },
+    {
+        # Ne sert qu'aux machines, switch « Optimisé » sur off : une machine
+        # qui n'a plus de place aujourd'hui est-elle moins chère demain ?
+        "nom": "prevision_pv_demain",
+        "libelle": "Prévision de production solaire de demain",
+        "type": "serie",
+        "unite": "kW",
+        "obligatoire": False,
+        "sans": "une machine qui n'a plus de place aujourd'hui n'est jamais "
+                "reportée au lendemain : elle est conseillée en heures creuses",
+    },
 ]
 
 # Actions exposées aux scénarios : relancer le calcul à la demande (du

@@ -10,18 +10,22 @@
 Deux choses sont vérifiées ici :
 
 - le plan des machines : il respecte la priorité du chauffe-eau, compte la
-  chauffe à sa puissance de pointe, compare chaque cycle aux heures creuses,
-  et ne repropose pas une machine déjà lancée ;
+  chauffe à sa puissance de pointe, compare chaque cycle aux heures creuses
+  (switch « Optimisé » sur on, ou jour rouge), sait reporter au lendemain un
+  cycle qui n'a plus de place, et ne repropose pas une machine déjà lancée ;
 - le calcul du chauffe-eau, qui pilote une chauffe réelle : l'arrivée des
   machines dans le module ne doit rien changer à ce qu'il décide.
 """
 
+import importlib
+import json
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
+from django.apps import apps
 from django.test import SimpleTestCase, TestCase, modify_settings
 
-from core.models import LogEntry, Module
+from core.models import LogEntry, Module, Setting
 from core.services import get_setting, get_variable, set_setting, set_variable
 from core.tests import connecte
 
@@ -61,6 +65,25 @@ def courbe(production, minuit=MINUIT):
 def plateau(kw, debut=8, fin=18):
     """Production constante entre deux heures, nulle ailleurs."""
     return courbe(lambda h: kw if debut <= h < fin else 0.0)
+
+
+DEMAIN = MINUIT + timedelta(days=1)
+
+
+def lendemain(points=None, tarifs=BLEU, ballon=None):
+    """Ce que le planificateur sait de demain (voir ``machines._lendemain``).
+
+    Par défaut : un lendemain bleu et ensoleillé, sans chauffe-eau.
+    """
+    return {
+        "minuit": DEMAIN,
+        "tarifs": tarifs,
+        "rouge": tarifs is ROUGE,
+        "points": courbe(lambda h: 5.0 if 8 <= h < 18 else 0.0, minuit=DEMAIN)
+        if points is None else points,
+        "ballon": ballon,
+        "erreur": "",
+    }
 
 
 def plan(**surcharges):
@@ -213,6 +236,121 @@ class PlanDesMachines(SimpleTestCase):
         self.assertIsNone(cycle["debut"])
         self.assertEqual(cycle["conseil"], "aucun")
 
+    # --- Switch « Optimisé » sur off : pas de comparaison ---
+
+    def test_switch_off_la_machine_reste_dans_la_plage(self):
+        """Sans soleil, la nuit serait moins chère : off n'en tient pas compte."""
+        cycle, = plan(points=plateau(0.0), comparer_hc=False)["cycles"]
+        self.assertEqual(cycle["conseil"], "jour")
+        self.assertEqual(cycle["heure"], "08:00")
+        self.assertAlmostEqual(cycle["cout_jour"], 0.30 * 0.1609)
+        # Le coût en heures creuses reste chiffré, pour information
+        self.assertAlmostEqual(cycle["cout_hc"], 0.30 * 0.1296)
+
+    def test_switch_off_sans_lendemain_un_cycle_sans_place_va_en_heures_creuses(self):
+        cycle, = plan(maintenant=a(21), comparer_hc=False)["cycles"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("hc", "22:00"))
+        self.assertIsNone(cycle["motif"])
+
+    # --- Switch sur off, plus de place aujourd'hui : ce soir ou demain ? ---
+
+    def _sans_place(self, **surcharges):
+        """Un cycle demandé à 21 h : la plage de lancement est finie."""
+        arguments = {"maintenant": a(21), "comparer_hc": False}
+        arguments.update(surcharges)
+        return plan(**arguments)
+
+    def test_demain_rouge_heures_creuses_ce_soir(self):
+        resultat = self._sans_place(lendemain=lendemain(tarifs=ROUGE))
+        cycle, = resultat["cycles"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("hc", "22:00"))
+        self.assertEqual(cycle["motif"], "demain_rouge")
+        self.assertIsNone(cycle["debut"])
+        # Les heures creuses de ce soir sont au tarif d'aujourd'hui (bleu)
+        self.assertAlmostEqual(cycle["cout_hc"], 0.30 * 0.1296)
+        self.assertEqual(resultat["non_places"], {"normal": 1})
+
+    def test_demain_ensoleille_le_cycle_y_est_reporte(self):
+        cycle, = self._sans_place(lendemain=lendemain())["cycles"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("demain", "08:00"))
+        self.assertEqual(cycle["motif"], "demain_moins_cher")
+        self.assertEqual(cycle["debut"], DEMAIN + timedelta(hours=8))
+        self.assertEqual(cycle["fin"], DEMAIN + timedelta(hours=9, minutes=10))
+        self.assertEqual(cycle["cout_demain"], 0.0)
+        self.assertEqual(cycle["import_kwh"], 0.0)
+        self.assertIsNone(cycle["cout_jour"])
+        self.assertAlmostEqual(cycle["cout_hc"], 0.30 * 0.1296)
+        self.assertAlmostEqual(cycle["ecart"], 0.30 * 0.1296)
+
+    def test_demain_sans_soleil_les_heures_creuses_restent_moins_cheres(self):
+        nuages = courbe(lambda h: 0.0, minuit=DEMAIN)
+        cycle, = self._sans_place(lendemain=lendemain(points=nuages))["cycles"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("hc", "22:00"))
+        self.assertEqual(cycle["motif"], "demain_plus_cher")
+        # Ce que demain aurait coûté est gardé, pour l'explication
+        self.assertAlmostEqual(cycle["cout_demain"], 0.30 * 0.1609)
+        self.assertEqual(cycle["demain_debut"], DEMAIN + timedelta(hours=8))
+
+    def test_demain_est_chiffre_au_tarif_de_demain(self):
+        """Un peu de soleil demain : 0,08 kWh à acheter. En bleu c'est moins
+        cher que la nuit ; au tarif d'un jour rouge ce serait l'inverse — or
+        c'est bien la grille de demain qui compte, pas celle d'aujourd'hui."""
+        voile = courbe(lambda h: 1.25 if 8 <= h < 18 else 0.0, minuit=DEMAIN)
+        aujourd_hui_rouge = self._sans_place(
+            tarifs=ROUGE, lendemain=lendemain(points=voile)
+        )
+        cycle, = aujourd_hui_rouge["cycles"]
+        self.assertEqual(cycle["conseil"], "demain")
+        self.assertAlmostEqual(cycle["cout_demain"], cycle["import_kwh"] * 0.1609)
+        self.assertLess(cycle["cout_demain"], 0.30 * 0.1568)
+
+    def test_couleur_de_demain_inconnue_heures_creuses_ce_soir(self):
+        cycle, = self._sans_place(lendemain=lendemain(tarifs=None))["cycles"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("hc", "22:00"))
+        self.assertEqual(cycle["motif"], "demain_inconnu")
+
+    def test_pas_de_prevision_pour_demain_heures_creuses_ce_soir(self):
+        cycle, = self._sans_place(lendemain=lendemain(points=[]))["cycles"]
+        self.assertEqual(cycle["conseil"], "hc")
+        self.assertEqual(cycle["motif"], "demain_sans_prevision")
+
+    def test_le_chauffe_eau_de_demain_passe_avant_la_machine(self):
+        """3 kW demain : le ballon (2,4 kW) ne laisse pas de quoi chauffer la
+        machine, elle attend qu'il ait fini."""
+        soleil = courbe(lambda h: 3.0 if 8 <= h < 18 else 0.0, minuit=DEMAIN)
+        ballon = {"debut": DEMAIN + timedelta(hours=8),
+                  "fin": DEMAIN + timedelta(hours=9), "kw": 2.4}
+        cycle, = self._sans_place(
+            lendemain=lendemain(points=soleil, ballon=ballon)
+        )["cycles"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("demain", "09:00"))
+        self.assertFalse(cycle["avec_ballon"])
+
+    def test_deux_cycles_reportes_se_suivent_demain(self):
+        cycles = self._sans_place(
+            demandes={"normal": 2, "court": 0}, lendemain=lendemain()
+        )["cycles"]
+        self.assertEqual([c["conseil"] for c in cycles], ["demain", "demain"])
+        self.assertEqual([c["heure"] for c in cycles], ["08:00", "09:40"])
+
+    def test_seuls_les_cycles_sans_place_sont_reportes(self):
+        """19 h 30 : un cycle tient encore aujourd'hui, les deux autres non."""
+        resultat = plan(
+            maintenant=a(19, 30), points=plateau(0.0), comparer_hc=False,
+            demandes={"normal": 3, "court": 0}, lendemain=lendemain(),
+        )
+        self.assertEqual(
+            [(c["conseil"], c["heure"]) for c in resultat["cycles"]],
+            [("jour", "19:30"), ("demain", "08:00"), ("demain", "09:40")],
+        )
+
+    def test_sur_on_le_lendemain_n_est_pas_regarde(self):
+        """Le report au lendemain est la règle du switch sur off : sur on, le
+        planificateur ne reçoit pas de lendemain et le cycle va en heures
+        creuses."""
+        cycle, = plan(maintenant=a(21))["cycles"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("hc", "22:00"))
+
     # --- Départage à coût égal ---
 
     def test_ajustement_faible_au_plus_tot_max_au_pic(self):
@@ -249,26 +387,38 @@ class PlanDesMachines(SimpleTestCase):
         self.assertEqual(cycle["type"], "court")
 
 
-def _besoins(points=None, tarifs=None):
-    """Remplace ``core.liaisons.lire_besoin`` : fournit prévision et tarifs."""
+def _besoins(points=None, tarifs=None, demain=None):
+    """Remplace ``core.liaisons.lire_besoin`` : fournit prévisions et tarifs.
+
+    ``demain`` : la prévision du lendemain (besoin ``prevision_pv_demain``).
+    """
     def lire(_module, nom):
         if nom == "prevision_pv":
             return (points, "") if points is not None else (None, "besoin non branché")
+        if nom == "prevision_pv_demain":
+            return (demain, "") if demain is not None else (None, "besoin non branché")
         if nom == "tarifs_jour":
             return tarifs, ""
         return None, "besoin inconnu"
     return mock.patch("core.liaisons.lire_besoin", side_effect=lire)
 
 
-def _tarifs_tempo(couleur="BLUE"):
-    """Objet « tarifs_jour » tel que le module Tempo le publie."""
+def _tarifs_tempo(couleur="BLUE", demain=None, restants=None):
+    """Objet « tarifs_jour » tel que le module Tempo le publie.
+
+    ``demain`` : la couleur du lendemain, ``None`` tant qu'elle n'est pas
+    publiée. ``restants`` : jours restant à tirer cette saison, par couleur.
+    """
     return {
         "couleur": couleur,
+        "couleur_demain": demain,
+        "jours_restants": restants,
         "prix": {
             "BLUE": {"HP": 0.1609, "HC": 0.1296},
+            "WHITE": {"HP": 0.1894, "HC": 0.1486},
             "RED": {"HP": 0.7562, "HC": 0.1568},
         },
-        "libelles": {"BLUE": "Bleu", "RED": "Rouge"},
+        "libelles": {"BLUE": "Bleu", "WHITE": "Blanc", "RED": "Rouge"},
         "hc_debut": 22,
         "hc_fin": 6,
     }
@@ -440,6 +590,219 @@ class CalculDesMachines(TestCase):
         self.assertFalse(cycle["lancee"])
         self.assertEqual(cycle["heure"], "12:00")
 
+    # --- Switch « Optimisé » ---
+
+    def test_le_switch_est_sur_on_par_defaut(self):
+        self.assertTrue(api.machines_optimise())
+        self.assertFalse(api.set_machines_optimise(False))
+        self.assertTrue(api.set_machines_optimise(True))
+
+    def test_switch_off_sans_soleil_la_machine_reste_dans_la_plage(self):
+        api.set_machines_optimise(False)
+        nuages = plateau_local(datetime(2026, 10, 4).astimezone(), kw=0.0)
+        with Horloge(7), _besoins(nuages, _tarifs_tempo()):
+            resultat = machines.calculer()
+        cycle, = resultat["cycles"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("jour", "08:00"))
+        self.assertFalse(resultat["optimise"])
+        self.assertFalse(resultat["comparer_hc"])
+        self.assertIn("sur off", " ".join(resultat["detail"]))
+        self.assertNotIn("en heures creuses", " ".join(resultat["detail"][-1:]))
+
+    def test_switch_on_sans_soleil_les_heures_creuses_sont_conseillees(self):
+        nuages = plateau_local(datetime(2026, 10, 4).astimezone(), kw=0.0)
+        with Horloge(7), _besoins(nuages, _tarifs_tempo()):
+            resultat = machines.calculer()
+        cycle, = resultat["cycles"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("hc", "22:00"))
+        self.assertTrue(resultat["comparer_hc"])
+        self.assertIn("sur on", " ".join(resultat["detail"]))
+
+    def test_jour_rouge_le_switch_n_est_pas_pris_en_compte(self):
+        api.set_machines_optimise(False)
+        nuages = plateau_local(datetime(2026, 10, 4).astimezone(), kw=0.0)
+        with Horloge(7), _besoins(nuages, _tarifs_tempo("RED")):
+            sans_soleil = machines.calculer()
+        with Horloge(7), _besoins(_soleil(), _tarifs_tempo("RED")):
+            au_soleil = machines.calculer()
+        # Le moins cher des deux : la nuit sans soleil, la journée au soleil
+        self.assertEqual(sans_soleil["cycles"][0]["conseil"], "hc")
+        self.assertEqual(
+            (au_soleil["cycles"][0]["conseil"], au_soleil["cycles"][0]["heure"]),
+            ("jour", "08:00"),
+        )
+        for resultat in (sans_soleil, au_soleil):
+            self.assertTrue(resultat["rouge"])
+            self.assertTrue(resultat["comparer_hc"])
+            self.assertIn("Jour rouge", " ".join(resultat["detail"]))
+        # L'état enregistré du switch, lui, n'a pas bougé
+        self.assertFalse(api.machines_optimise())
+        self.assertFalse(au_soleil["optimise"])
+
+    def test_jour_rouge_sans_place_le_lendemain_n_est_pas_regarde(self):
+        api.set_machines_optimise(False)
+        with Horloge(21), _besoins(
+            _soleil(), _tarifs_tempo("RED", demain="BLUE"), demain=_soleil(jour=5)
+        ):
+            resultat = machines.calculer()
+        cycle, = resultat["cycles"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("hc", "22:00"))
+        self.assertIsNone(resultat["lendemain"])
+
+    # --- Switch sur off, plus de place aujourd'hui ---
+
+    def _sans_place(self, tarifs, demain=None):
+        """Calcul lancé à 21 h, switch sur off : la plage est finie."""
+        api.set_machines_optimise(False)
+        with Horloge(21), _besoins(_soleil(), tarifs, demain=demain):
+            return machines.calculer()
+
+    def test_report_a_demain_quand_il_y_fait_soleil(self):
+        resultat = self._sans_place(
+            _tarifs_tempo(demain="BLUE"), demain=_soleil(jour=5)
+        )
+        with Horloge(21):
+            relu = machines.dernier_resultat()
+            cycle, = relu["affichees"]
+            self.assertEqual((cycle["conseil"], cycle["heure"]), ("demain", "08:00"))
+            self.assertEqual(cycle["debut"], datetime(2026, 10, 5, 8).astimezone())
+            self.assertEqual(cycle["cout_c"], 0.0)
+            self.assertAlmostEqual(cycle["ecart_c"], 100 * 0.30 * 0.1296)
+            # Rien à lancer aujourd'hui : l'heure de demain ne doit pas
+            # passer pour celle d'aujourd'hui dans un scénario
+            self.assertIsNone(relu["prochaine"])
+            self.assertEqual(relu["prochaine_demain"]["heure"], "08:00")
+            self.assertEqual((relu["restantes"], relu["reportees"]), (0, 1))
+            self.assertIsNone(info.prochaine_machine())
+            self.assertEqual(info.machines_restantes(), 0)
+            self.assertEqual(info.plan_machines(), "08:00 normal (demain)")
+        self.assertEqual(resultat["lendemain"]["tarifs"]["libelle"], "Bleu")
+        self.assertIn("lancer demain à 08:00", " ".join(resultat["detail"]))
+
+    def test_le_chauffe_eau_de_demain_est_estime_et_respecte(self):
+        """3 kW demain : le ballon prend le premier créneau qui le couvre
+        (08:00–09:00, réglages par défaut : 60 min, 2,5 kWh) et la machine
+        passe après lui."""
+        demain = plateau_local(datetime(2026, 10, 5).astimezone(), kw=3.0)
+        resultat = self._sans_place(_tarifs_tempo(demain="BLUE"), demain=demain)
+        cycle, = resultat["cycles"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("demain", "09:00"))
+        ballon = resultat["lendemain"]["ballon"]
+        self.assertEqual(ballon["debut"], datetime(2026, 10, 5, 8).astimezone())
+        self.assertEqual(ballon["fin"], datetime(2026, 10, 5, 9).astimezone())
+        self.assertEqual(ballon["kw"], 2.5)
+        self.assertIn("chauffe-eau estimé de 08:00 à 09:00", " ".join(resultat["detail"]))
+        self.assertIn("estimation grossière", " ".join(resultat["detail"]))
+        # Une estimation, jamais l'heure de chauffe : rien n'est mémorisé ni publié
+        self.assertTrue(calcul.dernier_resultat()["jamais_calcule"])
+        self.assertFalse(get_variable(calcul.VARIABLE_HEURE))
+
+    def test_demain_rouge_heures_creuses_ce_soir(self):
+        resultat = self._sans_place(
+            _tarifs_tempo(demain="RED"), demain=_soleil(jour=5)
+        )
+        cycle, = resultat["cycles"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("hc", "22:00"))
+        self.assertEqual(cycle["raison"], "demain est rouge")
+        self.assertTrue(resultat["lendemain"]["rouge"])
+        self.assertIn("Demain est un jour rouge", " ".join(resultat["detail"]))
+        self.assertEqual(resultat["prochaine"]["heure"], "22:00")
+
+    def test_couleur_de_demain_pas_encore_publiee(self):
+        resultat = self._sans_place(_tarifs_tempo(), demain=_soleil(jour=5))
+        cycle, = resultat["cycles"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("hc", "22:00"))
+        self.assertEqual(cycle["raison"], "couleur de demain pas encore connue")
+        self.assertIn("un jour rouge ne peut pas être exclu", " ".join(resultat["detail"]))
+
+    def test_couleur_inconnue_et_des_jours_rouges_restent(self):
+        resultat = self._sans_place(
+            _tarifs_tempo(restants={"BLUE": 250, "WHITE": 20, "RED": 3}),
+            demain=_soleil(jour=5),
+        )
+        cycle, = resultat["cycles"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("hc", "22:00"))
+        self.assertEqual(resultat["lendemain"]["rouges_restants"], 3)
+        self.assertIn("il reste 3 jours rouges", " ".join(resultat["detail"]))
+
+    def test_couleur_inconnue_mais_plus_aucun_jour_rouge_a_tirer(self):
+        """Demain ne peut plus être rouge : le report redevient possible."""
+        resultat = self._sans_place(
+            _tarifs_tempo(restants={"BLUE": 250, "WHITE": 20, "RED": 0}),
+            demain=_soleil(jour=5),
+        )
+        cycle, = resultat["cycles"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("demain", "08:00"))
+        grille = resultat["lendemain"]["tarifs"]
+        self.assertTrue(grille["supposee"])
+        self.assertEqual(grille["libelle"], "Blanc")
+        self.assertIn("plus aucun jour rouge", " ".join(resultat["detail"]))
+
+    def test_couleur_inconnue_demain_est_chiffre_au_plus_cher_possible(self):
+        """Un peu de soleil demain, 0,08 kWh à acheter : au tarif blanc tant
+        qu'il reste des jours blancs, au tarif bleu quand il n'en reste plus."""
+        voile = plateau_local(datetime(2026, 10, 5).astimezone(), kw=1.25)
+        for blancs, prix_hp in ((20, 0.1894), (0, 0.1609)):
+            with self.subTest(blancs=blancs):
+                resultat = self._sans_place(
+                    _tarifs_tempo(restants={"BLUE": 250, "WHITE": blancs, "RED": 0}),
+                    demain=voile,
+                )
+                cycle, = resultat["cycles"]
+                self.assertEqual(cycle["conseil"], "demain")
+                self.assertGreater(cycle["import_kwh"], 0.0)
+                self.assertAlmostEqual(
+                    cycle["cout_demain"], cycle["import_kwh"] * prix_hp
+                )
+
+    def test_la_couleur_publiee_prime_sur_le_compteur(self):
+        """Compteur à zéro mais demain annoncé rouge (cache en retard) : on
+        croit la couleur publiée."""
+        resultat = self._sans_place(
+            _tarifs_tempo(demain="RED", restants={"BLUE": 250, "WHITE": 20, "RED": 0}),
+            demain=_soleil(jour=5),
+        )
+        self.assertEqual(resultat["cycles"][0]["raison"], "demain est rouge")
+
+    def test_prevision_de_demain_non_branchee(self):
+        resultat = self._sans_place(_tarifs_tempo(demain="BLUE"))
+        cycle, = resultat["cycles"]
+        self.assertEqual(cycle["conseil"], "hc")
+        self.assertEqual(cycle["raison"], "pas de prévision pour demain")
+        self.assertIn("non branché", resultat["lendemain"]["erreur"])
+
+    def test_un_report_a_demain_est_perime_le_lendemain(self):
+        """Le plan vaut pour le jour où il est calculé : demain, on recalcule."""
+        self._sans_place(_tarifs_tempo(demain="BLUE"), demain=_soleil(jour=5))
+        with Horloge(7, jour=5):
+            lendemain = machines.dernier_resultat()
+            self.assertTrue(lendemain["perime"])
+            self.assertIsNone(lendemain["prochaine_demain"])
+            self.assertIsNone(info.plan_machines())
+        with Horloge(7, jour=5), _besoins(_soleil(jour=5), _tarifs_tempo()):
+            cycle, = machines.calculer()["cycles"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("jour", "08:00"))
+        self.assertFalse(cycle["lancee"])
+
+    def test_un_plan_d_avant_le_switch_se_relit(self):
+        """Un plan mémorisé par l'ancienne version n'a aucune des clés
+        nouvelles : il se lit comme un plan « sur on »."""
+        with Horloge(7), _besoins(_soleil(), _tarifs_tempo()):
+            machines.calculer()
+        ancien = json.loads(get_setting(machines.CLE_DERNIER, module=api.MODULE))
+        for cle in ("optimise", "rouge", "comparer_hc", "lendemain"):
+            del ancien[cle]
+        for cycle in ancien["cycles"]:
+            for cle in ("motif", "demain_debut", "cout_demain"):
+                del cycle[cle]
+        set_setting(machines.CLE_DERNIER, json.dumps(ancien), module=api.MODULE)
+        with Horloge(7):
+            relu = machines.dernier_resultat()
+        self.assertTrue(relu["comparer_hc"])
+        self.assertFalse(relu["rouge"])
+        self.assertEqual(relu["prochaine"]["heure"], "08:00")
+        self.assertEqual(relu["reportees"], 0)
+
     def test_infos_du_plan(self):
         api.set_machines_demandees(normal=1, court=1)
         with Horloge(7), _besoins(_soleil(), _tarifs_tempo()):
@@ -595,6 +958,43 @@ class PrevisionPubliee(TestCase):
         self.assertIsNone(info.creneau_retenu())
 
 
+class LiaisonDuLendemain(TestCase):
+    """La prévision de demain est un besoin nouveau : la migration core 0015
+    le branche là où la prévision du jour vient déjà du même fournisseur."""
+
+    CLE = "besoin_prevision_pv_demain"
+
+    def _migration(self):
+        return importlib.import_module("core.migrations.0015_liaison_prevision_demain")
+
+    def test_le_besoin_est_declare_et_branche(self):
+        from core.liaisons import besoins_du_module, liaison
+
+        besoin = next(
+            b for b in besoins_du_module(api.MODULE) if b["nom"] == "prevision_pv_demain"
+        )
+        self.assertEqual((besoin["type"], besoin["unite"]), ("serie", "kW"))
+        self.assertFalse(besoin["obligatoire"])
+        # La base de test sort des migrations : 0012 a branché la prévision
+        # du jour sur Solaire, 0015 a donc branché celle de demain.
+        self.assertEqual(
+            liaison(api.MODULE, "prevision_pv_demain"), "solcast.prevision_pv_demain"
+        )
+
+    def test_un_branchement_deja_choisi_n_est_pas_ecrase(self):
+        set_setting(self.CLE, "autre.prevision", module=api.MODULE)
+        self._migration().brancher(apps, None)
+        self.assertEqual(get_setting(self.CLE, module=api.MODULE), "autre.prevision")
+
+    def test_sans_solaire_pour_la_prevision_du_jour_on_ne_devine_pas(self):
+        Setting.objects.filter(module=api.MODULE, key=self.CLE).delete()
+        set_setting("besoin_prevision_pv", "autre.prevision", module=api.MODULE)
+        self._migration().brancher(apps, None)
+        self.assertFalse(
+            Setting.objects.filter(module=api.MODULE, key=self.CLE).exists()
+        )
+
+
 @modify_settings(INSTALLED_APPS={"append": "modules.heure_demarrage"})
 class PagesDuModule(TestCase):
     """L'onglet et les blocs du tableau de bord, module activé."""
@@ -641,6 +1041,81 @@ class PagesDuModule(TestCase):
         self.assertContains(page, "Cycles normaux")
         self.assertContains(page, "08:00")
         self.assertContains(page, "Cycle normal")
+        self.assertFalse(LogEntry.objects.filter(level=LogEntry.ERROR).exists())
+
+    # --- Switch « Optimisé » ---
+
+    def test_le_switch_est_sur_le_bloc_et_dans_l_onglet(self):
+        bloc = self._bloc_machines()
+        self.assertIn('id="machinesOptimiseBloc"', bloc)
+        self.assertIn('value="machines_optimise"', bloc)
+        self.assertRegex(bloc, r'id="machinesOptimiseBloc"[^>]*checked')
+        self.assertContains(self.client.get(self.URL), 'id="machinesOptimiseOnglet"')
+
+    def test_basculer_le_switch_l_enregistre_et_refait_le_plan(self):
+        nuages = plateau_local(datetime(2026, 10, 4).astimezone(), kw=0.0)
+        with Horloge(7), _besoins(nuages, _tarifs_tempo()):
+            self.client.post(self.URL, {"action": "machines", "machines_normal": "1"})
+            self.assertIn("heures creuses, à partir de 22:00", self._bloc_machines())
+
+            # Case décochée = champ absent : c'est ainsi qu'un navigateur l'envoie
+            reponse = self.client.post(
+                self.URL, {"action": "machines_optimise", "retour": "dashboard"}
+            )
+            self.assertRedirects(reponse, "/")
+            self.assertFalse(api.machines_optimise())
+            bloc = self._bloc_machines()
+            self.assertNotRegex(bloc, r'id="machinesOptimiseBloc"[^>]*checked')
+            self.assertNotIn("heures creuses, à partir de 22:00", bloc)
+            self.assertIn("08:00", bloc)
+            self.assertIn("plage de lancement seule", bloc)
+
+            self.client.post(self.URL, {"action": "machines_optimise", "optimise": "oui"})
+            self.assertTrue(api.machines_optimise())
+            self.assertIn("heures creuses, à partir de 22:00", self._bloc_machines())
+        self.assertTrue(
+            LogEntry.objects.filter(
+                module=api.MODULE, message__contains="switch « Optimisé » sur off"
+            ).exists()
+        )
+        self.assertFalse(LogEntry.objects.filter(level=LogEntry.ERROR).exists())
+
+    def test_basculer_le_switch_sans_machine_demandee_ne_planifie_rien(self):
+        self.client.post(self.URL, {"action": "machines_optimise"})
+        self.assertFalse(api.machines_optimise())
+        self.assertTrue(machines.dernier_resultat()["jamais_calcule"])
+
+    def test_calculer_et_enregistrer_le_profil_ne_touchent_pas_au_switch(self):
+        api.set_machines_optimise(False)
+        self._poster(action="machines", machines_normal="1", machines_court="0")
+        champs = {k: d for k, d, _t in api.REGLAGES_MACHINES}
+        self._poster(action="machines_params", **champs)
+        self.assertFalse(api.machines_optimise())
+
+    def test_jour_rouge_le_bloc_le_dit(self):
+        api.set_machines_optimise(False)
+        with Horloge(7), _besoins(_soleil(), _tarifs_tempo("RED")):
+            self.client.post(self.URL, {"action": "machines", "machines_normal": "1"})
+            bloc = self._bloc_machines()
+        self.assertIn("jour rouge : sans effet aujourd", bloc)
+        self.assertNotRegex(bloc, r'id="machinesOptimiseBloc"[^>]*checked')
+
+    def test_un_cycle_reporte_a_demain_s_affiche(self):
+        api.set_machines_optimise(False)
+        with Horloge(21), _besoins(
+            _soleil(), _tarifs_tempo(demain="BLUE"), demain=_soleil(jour=5)
+        ):
+            reponse = self.client.post(
+                self.URL, {"action": "machines", "machines_normal": "1"}, follow=True
+            )
+            bloc = self._bloc_machines()
+        self.assertContains(reponse, "prochain lancement demain à 08:00")
+        self.assertContains(reponse, "demain à 08:00</strong>")
+        self.assertContains(reponse, "cts de moins qu'en heures creuses ce soir")
+        self.assertIn("<strong>demain</strong>, jusqu", bloc)
+        self.assertIn("08:00", bloc)
+        # Le chauffe-eau de demain n'est qu'estimé : l'écran n'en dit rien
+        self.assertNotIn("chauffe-eau", bloc.split("<strong>demain</strong>")[1].split("</div>")[0])
         self.assertFalse(LogEntry.objects.filter(level=LogEntry.ERROR).exists())
 
     def _bloc_machines(self):

@@ -1,0 +1,24 @@
+{% comment %} Switch « Optimisé » des machines — le même sur le tableau de bord et dans
+   l'onglet. Contexte : optimise (état enregistré), p (dernier plan), retour
+   (« dashboard » pour y revenir après l'envoi), suffixe (rend l'id unique).
+   Formulaire à part : une case décochée n'est pas envoyée, elle éteindrait
+   donc le switch à chaque « Calculer » si elle vivait dans l'autre formulaire.
+   Basculer envoie aussitôt, et le plan est refait dans la foulée. {% endcomment %}
+<form method="post" action="{% url 'core:module_tab' 'heure_demarrage' %}" class="mb-0">
+  {% csrf_token %}
+  <input type="hidden" name="action" value="machines_optimise">
+  {% if retour %}<input type="hidden" name="retour" value="{{ retour }}">{% endif %}
+  <div class="form-check form-switch mb-0"
+       title="On : chaque créneau est comparé aux heures creuses. Off : les machines sont placées dans la plage de lancement, sans regarder les heures creuses. Un jour rouge, le switch n'est pas pris en compte.">
+    <input class="form-check-input" type="checkbox" role="switch"
+           id="machinesOptimise{{ suffixe }}" name="optimise" value="oui"
+           {% if optimise %}checked{% endif %} onchange="this.form.submit()">
+    <label class="form-check-label" for="machinesOptimise{{ suffixe }}">Optimisé</label>
+  </div>
+  {% if p.rouge and not p.perime %}
+    <div class="small text-warning">jour rouge : sans effet aujourd'hui</div>
+  {% else %}
+    <div class="small text-secondary">
+      {% if optimise %}comparé aux heures creuses{% else %}plage de lancement seule{% endif %}</div>
+  {% endif %}
+</form>

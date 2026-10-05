@@ -7,7 +7,7 @@
 
 """Fonctions d'INFO du module Solaire (contrat INFOS)."""
 
-from datetime import date
+from datetime import date, timedelta
 
 from . import api
 
@@ -57,21 +57,39 @@ def prevision_pv():
     regarde que ce qui reste à venir. ``None`` si les prévisions sont
     indisponibles (module non configuré, API injoignable et aucun cache).
     """
+    return _prevision_du(date.today())
+
+
+def prevision_pv_demain():
+    """Courbe de production prévue demain : ``[(datetime, kW)]``.
+
+    Même forme que ``prevision_pv``, pour la journée suivante. Elle sert à
+    qui doit décider aujourd'hui d'un report au lendemain. La liste est vide
+    si la prévision en cache ne va pas jusque-là, ``None`` si les prévisions
+    sont indisponibles. Une journée couverte en partie seulement (horizon de
+    48 h, cache ancien) est renvoyée telle quelle : les heures qui manquent
+    sont des heures sans production connue, au consommateur d'en tenir compte.
+    """
+    return _prevision_du(date.today() + timedelta(days=1))
+
+
+def _prevision_du(jour):
     try:
         forecast = api.get_forecast()
     except Exception:
         return None
-    today = date.today()
     return [
         (p["time"], p["pv_kw"])
         for p in (forecast or {}).get("periods", [])
-        if p["time"].date() == today
+        if p["time"].date() == jour
     ]
 
 
 INFOS = [
     {"nom": "prevision_pv", "type": "serie", "unite": "kW",
      "description": "Prévision de production du jour (pas 30 min)"},
+    {"nom": "prevision_pv_demain", "type": "serie", "unite": "kW",
+     "description": "Prévision de production de demain (pas 30 min)"},
     {"nom": "prevu_aujourdhui_kwh", "description": "Prévu aujourd'hui (kWh)"},
     {"nom": "prevu_demain_kwh", "description": "Prévu demain (kWh)"},
     {"nom": "creneau_debut", "description": "Début du meilleur créneau chauffe-eau (HH:MM)"},

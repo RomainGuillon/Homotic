@@ -119,27 +119,32 @@ def _plan_machines():
 
 
 def prochaine_machine():
-    """Heure de lancement de la prochaine machine (HH:MM), sinon None."""
+    """Heure de lancement de la prochaine machine d'aujourd'hui (HH:MM), sinon None.
+
+    Une machine reportée à demain n'est pas « la prochaine » : son heure,
+    lue aujourd'hui, déclencherait un scénario un jour trop tôt.
+    """
     plan = _plan_machines()
     return plan["prochaine"]["heure"] if plan and plan["prochaine"] else None
 
 
 def machines_restantes():
-    """Nombre de machines du plan du jour qui restent à lancer."""
+    """Nombre de machines qui restent à lancer aujourd'hui (ce soir compris)."""
     plan = _plan_machines()
     return plan["restantes"] if plan else 0
 
 
 def plan_machines():
-    """Machines restant à lancer : « 11:00 normal · 15:30 normal · 22:00 court (HC) ».
+    """Machines restant à lancer : « 11:00 normal · 22:00 court (HC) · 10:30 normal (demain) ».
 
     Comme à l'écran, une machine dont l'heure est passée n'y figure plus.
     """
     plan = _plan_machines()
     if not plan:
         return None
+    suffixes = {"hc": " (HC)", "demain": " (demain)"}
     return " · ".join(
-        f"{c['heure']} {c['type']}" + (" (HC)" if c.get("conseil") == "hc" else "")
+        f"{c['heure']} {c['type']}" + suffixes.get(c.get("conseil"), "")
         for c in plan["affichees"] if c.get("heure")
     ) or None
 
@@ -157,7 +162,7 @@ INFOS = [
      "description": "Le dernier calcul date-t-il d'aujourd'hui ? (oui/non)"},
     {"nom": "heure_calcul", "description": "Heure du dernier calcul (HH:MM)"},
     {"nom": "prochaine_machine",
-     "description": "Heure de lancement de la prochaine machine (HH:MM)"},
+     "description": "Heure de lancement de la prochaine machine d'aujourd'hui (HH:MM)"},
     {"nom": "machines_restantes", "description": "Machines restant à lancer aujourd'hui"},
     {"nom": "plan_machines", "description": "Machines restant à lancer (texte)"},
 ]

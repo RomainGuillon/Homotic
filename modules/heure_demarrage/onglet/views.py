@@ -129,9 +129,45 @@ def _planifier_machines(request):
         messages.success(
             request, f"Machines planifiées : prochain lancement {quand}."
         )
+    elif plan["prochaine_demain"]:
+        messages.success(
+            request,
+            "Machines planifiées : plus de créneau aujourd'hui, prochain "
+            f"lancement demain à {plan['prochaine_demain']['heure']}.",
+        )
     else:
         messages.warning(
             request, "Machines planifiées, mais aucun lancement à venir aujourd'hui."
+        )
+
+
+def _basculer_optimise(request):
+    """Enregistre le switch « Optimisé » des machines et refait le plan.
+
+    Le plan affiché a été calculé avec l'ancien état : sans recalcul, le
+    switch dirait une chose et les heures une autre.
+    """
+    actif = api.set_machines_optimise(bool(request.POST.get("optimise")))
+    journal(
+        f"Machines : switch « Optimisé » sur {'on' if actif else 'off'}",
+        module=api.MODULE,
+    )
+    plan = machines.recalculer_si_demande()
+    effet = (
+        "chaque créneau est comparé aux heures creuses" if actif
+        else "les machines sont placées dans la plage de lancement, sans "
+             "regarder les heures creuses"
+    )
+    if plan and plan.get("rouge"):
+        messages.info(
+            request,
+            f"Optimisé {'activé' if actif else 'désactivé'} — sans effet "
+            "aujourd'hui : en jour rouge, chaque machine va là où elle coûte "
+            "le moins.",
+        )
+    else:
+        messages.success(
+            request, f"Optimisé {'activé' if actif else 'désactivé'} : {effet}."
         )
 
 
@@ -166,6 +202,8 @@ def onglet(request):
                 _planifier_machines(request)
             elif action == "machines_params":
                 _save_machines_params(request)
+            elif action == "machines_optimise":
+                _basculer_optimise(request)
         except Exception as exc:
             messages.error(request, f"Échec : {exc}")
         # Le bloc « Machines » du tableau de bord poste ici : on y retourne.
@@ -210,6 +248,7 @@ def onglet(request):
             "p": machines.dernier_resultat(),
             "demandes": api.machines_demandees(),
             "max_machines": api.MAX_MACHINES,
+            "optimise": api.machines_optimise(),
             "profils": [api.profil_machine(t) for t, _libelle in api.TYPES_MACHINE],
             "machine": {
                 "pointe_kw": f"{api.pointe_machine_kw():.2f}",

@@ -139,6 +139,7 @@ Liaisons — Heure de démarrage
 | --- | --- | --- | --- | --- |
 | `heure_demarrage` | `prevision_pv` | `serie` kW | `solcast.prevision_pv` | Trouver le créneau où le surplus couvre les 2,4 kWh du ballon |
 | `heure_demarrage` | `tarifs_jour` | `objet` | `tempo.tarifs_jour` | Comparer chauffe solaire de jour et heures creuses de nuit |
+| `heure_demarrage` | `prevision_pv_demain` | `serie` kW | `solcast.prevision_pv_demain` | Reporter au lendemain une machine qui n'a plus de place aujourd'hui |
 | `enphase` | `tarifs_jour` | `objet` | `tempo.tarifs_jour` | Chiffrer la journée mesurée en euros |
 | `solcast` | `production_reelle` | `serie` kW | `enphase.production_reelle` | Superposer le réalisé au prévu |
 | `solcast` | `creneau_chauffe` | `objet` | `heure_demarrage.creneau_retenu` | Surligner le créneau sur la courbe du jour |
@@ -162,9 +163,17 @@ mieux qu'un import.
 ```python
 # tarifs_jour — la couleur de la veille est nécessaire car les heures
 # creuses vont de 22h à 6h : la nuit en cours relève du jour précédent.
-{"couleur": "BLUE", "couleur_veille": "BLUE",
- "hp": 0.1609, "hc": 0.1296,          # €/kWh
- "hc_debut": "22:00", "hc_fin": "06:00"}
+# Les prix de toutes les couleurs sont donnés, d'où la clé « prix ».
+# couleur_demain vaut None tant qu'elle n'est pas publiée (vers 11 h) ;
+# jours_restants (None si indisponible) dit alors la seule chose certaine :
+# à zéro jour rouge restant, demain ne peut pas être rouge.
+{"couleur": "BLUE", "couleur_veille": "BLUE", "couleur_demain": None,
+ "jours_restants": {"BLUE": 265, "WHITE": 40, "RED": 22},
+ "prix": {"BLUE": {"HP": 0.1609, "HC": 0.1296},     # €/kWh
+          "WHITE": {"HP": 0.1894, "HC": 0.1486},
+          "RED": {"HP": 0.7562, "HC": 0.1568}},
+ "libelles": {"BLUE": "Bleu", "WHITE": "Blanc", "RED": "Rouge"},
+ "hc_debut": 22, "hc_fin": 6}                       # heures
 
 # creneau_retenu — l'heure effectivement retenue, forçage manuel compris.
 # duree_min et besoin_kwh sont la prévision du cycle : le temps et l'énergie

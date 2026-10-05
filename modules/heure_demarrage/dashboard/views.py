@@ -36,6 +36,7 @@ def blocs(request):
                     "p": machines.dernier_resultat(),
                     "demandes": api.machines_demandees(),
                     "max_machines": api.MAX_MACHINES,
+                    "optimise": api.machines_optimise(),
                 },
                 request=request,
             ),

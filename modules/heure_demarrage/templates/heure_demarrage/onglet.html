@@ -130,10 +130,14 @@
   <div class="card-body">
     <p class="text-secondary small mb-3">Indiquer le nombre de cycles à faire aujourd'hui.
       Le chauffe-eau reste prioritaire : son créneau n'est pas modifié, les machines se
-      placent sur le surplus solaire qui reste. Chaque créneau est comparé aux heures
-      creuses.</p>
+      placent sur le surplus solaire qui reste. Switch <strong>Optimisé</strong> sur on :
+      chaque créneau est comparé aux heures creuses. Sur off : les machines restent dans
+      la plage de lancement, et celle qui n'y trouve plus de place est reportée à demain
+      si elle y coûte moins que les heures creuses de ce soir. Un jour rouge, le switch
+      n'est pas pris en compte.</p>
 
-    <form method="post" class="d-flex flex-wrap align-items-end gap-3 mb-3">
+    <div class="d-flex flex-wrap align-items-end justify-content-between gap-3 mb-3">
+    <form method="post" class="d-flex flex-wrap align-items-end gap-3">
       {% csrf_token %}
       <input type="hidden" name="action" value="machines">
       <div>
@@ -149,6 +153,8 @@
       <button class="btn btn-primary">Calculer</button>
       <button class="btn btn-outline-secondary" name="tout" value="1">Tout replanifier</button>
     </form>
+    {% include "heure_demarrage/_switch_optimise.html" with suffixe="Onglet" %}
+    </div>
     <p class="form-text mt-0 mb-3">Une machine dont l'heure est passée est supposée lancée :
       elle disparaît du plan, et un nouveau calcul ne replace que les autres.
       « Tout replanifier » repart de zéro.</p>
@@ -181,12 +187,18 @@
               <tr>
                 <td>{{ c.libelle }}<br>
                   <span class="small text-secondary">{{ c.duree_min }} min · {{ c.kwh|floatformat:2 }} kWh</span></td>
-                <td>{% if c.debut %}{{ c.debut|date:"H:i" }} — {{ c.fin|date:"H:i" }}
+                <td>{% if c.conseil == "demain" %}<span class="text-secondary">plus de créneau</span>
+                    <br><span class="small">demain {{ c.debut|date:"H:i" }} — {{ c.fin|date:"H:i" }}</span>
+                  {% elif c.debut %}{{ c.debut|date:"H:i" }} — {{ c.fin|date:"H:i" }}
                     {% if c.avec_ballon %}<br><span class="small text-secondary">avec le chauffe-eau</span>{% endif %}
-                  {% else %}<span class="text-secondary">plus de créneau</span>{% endif %}</td>
+                  {% else %}<span class="text-secondary">plus de créneau</span>
+                    {% if c.raison %}<br><span class="small text-secondary">{{ c.raison }}</span>{% endif %}
+                  {% endif %}</td>
                 <td class="text-end">{% if c.solaire_kwh is not None %}<span class="text-success">{{ c.solaire_kwh|floatformat:2 }} kWh</span>{% else %}—{% endif %}</td>
                 <td class="text-end">{% if c.import_kwh is not None %}{{ c.import_kwh|floatformat:2 }} kWh{% else %}—{% endif %}</td>
-                <td class="text-end">{% if c.cout_jour_c is not None %}{{ c.cout_jour_c|floatformat:1 }} cts{% else %}—{% endif %}</td>
+                <td class="text-end">{% if c.cout_jour_c is not None %}{{ c.cout_jour_c|floatformat:1 }} cts
+                  {% elif c.conseil == "demain" %}{{ c.cout_demain_c|floatformat:1 }} cts<br><span class="small text-secondary">demain</span>
+                  {% else %}—{% endif %}</td>
                 <td class="text-end">{% if c.cout_hc_c is not None %}{{ c.cout_hc_c|floatformat:1 }} cts{% else %}—{% endif %}</td>
                 <td class="ps-4">
                   {% if c.conseil == "jour" %}
@@ -194,6 +206,9 @@
                   {% elif c.conseil == "hc" %}
                     <strong style="color:#93c5fd">heures creuses, dès {{ c.heure }}</strong>
                     {% if c.ecart_c is not None %}<br><span class="small text-secondary">{{ c.ecart_c|floatformat:1 }} cts de moins</span>{% endif %}
+                  {% elif c.conseil == "demain" %}
+                    <strong style="color:#c4b5fd">demain à {{ c.heure }}</strong>
+                    <br><span class="small text-secondary">{{ c.ecart_c|floatformat:1 }} cts de moins qu'en heures creuses ce soir</span>
                   {% else %}
                     <span class="text-secondary">à reporter</span>
                   {% endif %}

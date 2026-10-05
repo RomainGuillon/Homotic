@@ -38,10 +38,29 @@ deux cycles — il n'y a qu'une machine. À coût égal, le réglage
 « ajustement » du module départage, comme pour le ballon : au plus tôt
 (« faible ») ou au plus fort de la production (« max »).
 
-**Heures creuses** : le coût de chaque cycle en journée est comparé à celui
-du même cycle acheté en entier en heures creuses. Si la nuit est moins
-chère, le module le dit — c'est le cas des journées sans soleil, et presque
-toujours des jours rouges.
+**Le switch « Optimisé »** décide de ce qu'on fait des heures creuses :
+
+- sur « on », le coût de chaque cycle en journée est comparé à celui du même
+  cycle acheté en entier en heures creuses. Si la nuit est moins chère, le
+  module le dit — c'est le cas des journées sans soleil ;
+- sur « off », les cycles sont placés dans la plage de lancement, sans
+  regarder les heures creuses.
+
+**Un jour rouge, le switch ne compte pas.** Le kWh d'heures pleines y coûte
+plusieurs fois celui de la nuit : chaque cycle va là où il revient le moins
+cher, sur la production ou en heures creuses.
+
+**Plus de place dans la plage, switch sur « off »** : le cycle qui reste
+n'est pas abandonné. Si demain est rouge, il passe en heures creuses ce
+soir. Sinon on regarde la prévision de demain — chauffe-eau de demain
+retiré, il reste prioritaire — et le cycle y est reporté s'il y coûte moins
+que les heures creuses de ce soir. À défaut (pas de prévision, ou pas moins
+cher) : heures creuses ce soir.
+
+Tant que la couleur de demain n'est pas publiée, on ne peut pas exclure un
+jour rouge : heures creuses ce soir là aussi — sauf s'il ne reste plus aucun
+jour rouge à tirer cette saison, auquel cas demain est forcément bleu ou
+blanc et il est chiffré au plus cher des deux.
 
 Comme pour le ballon, **rien n'est recalculé à l'affichage** : le plan est
 mémorisé (réglage ``machines_dernier_calcul``) et ne change que sur demande.
@@ -66,6 +85,22 @@ PAS_DEPART_MIN = 10
 
 # Pas des prévisions de production (les points sont datés au milieu du pas).
 PAS_PREVISION_MIN = 30
+
+# Code du jour rouge dans l'objet « tarifs_jour » (clés « couleur » et
+# « couleur_demain »). C'est la seule couleur que ce fichier connaît : les
+# autres ne sont pour lui que des clés de la grille de prix.
+COULEUR_ROUGE = "RED"
+
+# Pourquoi un cycle sans place aujourd'hui n'est pas reporté à demain — en
+# clair, pour l'écran et le Journal. La clé est le « motif » posé par
+# ``_reporter``.
+_MOTIFS = {
+    "demain_rouge": "demain est rouge",
+    "demain_inconnu": "couleur de demain pas encore connue",
+    "demain_sans_prevision": "pas de prévision pour demain",
+    "demain_plein": "pas de créneau demain non plus",
+    "demain_plus_cher": "demain ne coûterait pas moins",
+}
 
 _JOUR_MIN = 24 * 60
 # Le plan est tenu à la minute, sur deux jours : un cycle lancé tard dans la
@@ -186,7 +221,7 @@ def _evaluer(depart, profil, pointe_kw, surplus, ballon_kw, prix):
 
 def planifier(*, maintenant, points, profils, demandes, pointe_kw, talon_kw,
               ballon=None, plage=("08:00", "20:00"), pause_min=30, tarifs=None,
-              ajustement="faible", deja=()):
+              ajustement="faible", deja=(), comparer_hc=True, lendemain=None):
     """Place les cycles demandés sur la journée. Fonction pure.
 
     - ``maintenant`` : instant du calcul (datetime avec fuseau) ; aucun
@@ -203,11 +238,18 @@ def planifier(*, maintenant, points, profils, demandes, pointe_kw, talon_kw,
       bornes en heures), ou ``None`` — on classe alors sur l'énergie achetée ;
     - ``deja`` : cycles d'un plan précédent déjà lancés. Ils sont conservés
       tels quels, comptent dans la demande, et la machine n'est libre
-      qu'après eux.
+      qu'après eux ;
+    - ``comparer_hc`` : vrai (switch « Optimisé » sur on, ou jour rouge), un
+      cycle placé de jour est conseillé en heures creuses s'il y coûte
+      moins. Faux, il reste à son créneau de jour ;
+    - ``lendemain`` : ce qu'on sait de demain (voir ``_lendemain``), ou
+      ``None``. Fourni, un cycle qui n'a plus de place aujourd'hui est
+      examiné pour demain au lieu d'aller d'office en heures creuses.
 
     Retourne ``{"cycles": [...], "non_places": {type: n}}``. Les cycles sont
-    triés par heure ; ceux qui n'ont pas trouvé de place ferment la liste,
-    avec ``debut`` à ``None``.
+    triés par heure ; ceux qui n'ont pas trouvé de place aujourd'hui ferment
+    la liste — en heures creuses (``debut`` à ``None``), puis reportés à
+    demain (``conseil`` à « demain »).
     """
     minuit = _minuit(maintenant)
     surplus, ballon_kw = _courbes(maintenant, points, talon_kw, ballon)
@@ -313,22 +355,98 @@ def planifier(*, maintenant, points, profils, demandes, pointe_kw, talon_kw,
     for depart, type_cycle, bilan in places:
         profil = profils[type_cycle]
         debut = minuit + timedelta(minutes=depart)
-        cycles.append(_cycle(profil, tarifs, debut, bilan))
+        cycles.append(_cycle(profil, tarifs, debut, bilan, comparer_hc))
     cycles.sort(key=lambda c: c["debut"])
 
-    non_places = dict(zip(types, reste))
-    for type_cycle, nombre in non_places.items():
-        for _ in range(nombre):
-            cycles.append(_cycle(profils[type_cycle], tarifs, None, None))
+    non_places = {t: n for t, n in zip(types, reste) if n}
+    if lendemain is not None and tarifs and non_places:
+        cycles += _reporter(
+            non_places, profils, tarifs, lendemain,
+            pointe_kw=pointe_kw, talon_kw=talon_kw, plage=plage,
+            pause_min=pause_min, ajustement=ajustement,
+        )
+    else:
+        for type_cycle, nombre in non_places.items():
+            for _ in range(nombre):
+                cycles.append(_cycle(profils[type_cycle], tarifs, None, None))
 
-    return {"cycles": cycles, "non_places": {t: n for t, n in non_places.items() if n}}
+    return {"cycles": cycles, "non_places": non_places}
 
 
-def _cycle(profil, tarifs, debut, bilan):
+def _reporter(non_places, profils, tarifs, lendemain, **reglages):
+    """Cycles sans place aujourd'hui, switch « Optimisé » sur off : où vont-ils ?
+
+    - demain est rouge : heures creuses ce soir. Elles relèvent encore de
+      la couleur d'aujourd'hui, et on ne parie pas sur le soleil d'un jour
+      où chaque kWh acheté coûte plusieurs fois le prix de la nuit ;
+    - la couleur de demain n'est pas encore publiée et il reste des jours
+      rouges à tirer : heures creuses ce soir aussi, faute de pouvoir
+      exclure un jour rouge (``lendemain["tarifs"]`` est alors ``None``) ;
+    - sinon les cycles sont placés sur la prévision de demain, comme ils
+      l'auraient été aujourd'hui (même plage, même pause, chauffe-eau de
+      demain retiré). Chacun n'y est reporté que s'il y coûte strictement
+      moins que les heures creuses de ce soir.
+
+    Chaque cycle porte un ``motif`` qui dit laquelle de ces issues l'a
+    emporté — c'est ce qu'affichent l'écran et le Journal.
+    """
+    def ce_soir(type_cycle, motif, essai=None):
+        cycle = _cycle(profils[type_cycle], tarifs, None, None)
+        cycle["motif"] = motif
+        if essai:
+            # Ce que demain aurait donné : gardé pour l'explication.
+            cycle["demain_debut"] = essai["debut"]
+            cycle["cout_demain"] = essai["cout_jour"]
+        return cycle
+
+    if lendemain.get("rouge"):
+        motif = "demain_rouge"
+    elif not lendemain.get("tarifs"):
+        motif = "demain_inconnu"
+    elif not lendemain.get("points"):
+        motif = "demain_sans_prevision"
+    else:
+        motif = ""
+    if motif:
+        return [ce_soir(t, motif) for t, n in non_places.items() for _ in range(n)]
+
+    essai = planifier(
+        maintenant=lendemain["minuit"], points=lendemain["points"],
+        profils=profils, demandes=non_places, ballon=lendemain.get("ballon"),
+        tarifs=lendemain["tarifs"], comparer_hc=False, **reglages,
+    )
+    de_nuit, reportes = [], []
+    for cycle in essai["cycles"]:
+        cout_hc = profils[cycle["type"]]["kwh"] * tarifs["hc"]
+        if cycle["debut"] is None:
+            de_nuit.append(ce_soir(cycle["type"], "demain_plein"))
+        elif cycle["cout_jour"] < cout_hc - 1e-9:
+            cycle.update({
+                "conseil": "demain",
+                "motif": "demain_moins_cher",
+                "demain_debut": cycle["debut"],
+                "cout_demain": cycle["cout_jour"],
+                # Ni l'un ni l'autre ne parlent de demain : pas de créneau
+                # de jour aujourd'hui, et les heures creuses sont celles de
+                # ce soir, au tarif d'aujourd'hui.
+                "cout_jour": None,
+                "cout_hc": cout_hc,
+                "ecart": cout_hc - cycle["cout_jour"],
+            })
+            reportes.append(cycle)
+        else:
+            de_nuit.append(ce_soir(cycle["type"], "demain_plus_cher", essai=cycle))
+    return de_nuit + reportes
+
+
+def _cycle(profil, tarifs, debut, bilan, comparer_hc=True):
     """Fiche d'un cycle : son créneau de jour, ses coûts, et le conseil.
 
     ``debut`` à ``None`` : le cycle n'a pas trouvé de place dans la plage de
     lancement. Il ne reste alors que les heures creuses — ou un autre jour.
+
+    ``comparer_hc`` à faux : le cycle reste à son créneau de jour quoi qu'il
+    coûte. Le coût en heures creuses est quand même chiffré, pour information.
     """
     kwh = profil["kwh"]
     cout_hc = kwh * tarifs["hc"] if tarifs else None
@@ -348,6 +466,10 @@ def _cycle(profil, tarifs, debut, bilan):
         "ecart": None,
         "avec_ballon": False,
         "lancee": False,
+        # Renseignés par ``_reporter`` pour un cycle sans place aujourd'hui.
+        "motif": None,
+        "demain_debut": None,
+        "cout_demain": None,
     }
 
     if bilan is None:
@@ -363,7 +485,7 @@ def _cycle(profil, tarifs, debut, bilan):
     })
     # La nuit ne l'emporte que si elle est strictement moins chère : à coût
     # égal, autant lancer de jour, quand on est là pour étendre le linge.
-    if cout_hc is not None and cout_hc < bilan["cout_jour"] - 1e-9:
+    if comparer_hc and cout_hc is not None and cout_hc < bilan["cout_jour"] - 1e-9:
         cycle["conseil"] = "hc"
         cycle["heure"] = heure_hc
     else:
@@ -398,26 +520,155 @@ def _prevision(maintenant):
 def _tarifs():
     """Tarifs du jour utiles au calcul, ou ``None`` s'ils sont inconnus.
 
-    ``{"hp", "hc", "hc_debut", "hc_fin", "couleur", "libelle"}``. L'objet
-    vient du besoin ``tarifs_jour`` ; un fournisseur qui ne donnerait pas
-    tous les champs attendus vaut « tarifs inconnus », pas une erreur.
+    ``{"hp", "hc", "hc_debut", "hc_fin", "couleur", "libelle", "demain",
+    "rouges_restants"}``. L'objet vient du besoin ``tarifs_jour`` ; un
+    fournisseur qui ne donnerait pas tous les champs attendus vaut « tarifs
+    inconnus », pas une erreur.
+
+    ``demain`` est la grille du lendemain (voir ``_grille_demain``), ou
+    ``None`` quand on ne peut pas exclure un jour rouge. ``rouges_restants``
+    est le nombre de jours rouges encore à tirer cette saison, ``None`` si
+    le fournisseur ne le dit pas.
     """
     from core.liaisons import lire_besoin
 
     tarifs, _err = lire_besoin(MODULE, "tarifs_jour")
     try:
-        couleur = tarifs["couleur"]
-        prix = tarifs["prix"][couleur]
-        return {
-            "hp": float(prix["HP"]),
-            "hc": float(prix["HC"]),
-            "hc_debut": int(tarifs.get("hc_debut", 22)),
-            "hc_fin": int(tarifs.get("hc_fin", 6)),
-            "couleur": couleur,
-            "libelle": (tarifs.get("libelles") or {}).get(couleur, couleur),
-        }
+        grille = _grille(tarifs, tarifs["couleur"])
     except (TypeError, KeyError, ValueError, AttributeError):
         return None
+    grille["demain"], grille["rouges_restants"] = _grille_demain(tarifs)
+    return grille
+
+
+def _grille_demain(tarifs):
+    """Grille du lendemain et jours rouges restants : ``(grille, nombre)``.
+
+    - la couleur de demain est publiée : sa grille ;
+    - elle ne l'est pas, mais il ne reste plus aucun jour rouge à tirer
+      cette saison : demain ne peut pas être rouge. On ignore encore sa
+      couleur, alors on le chiffre au tarif de la plus chère de celles qui
+      restent possibles — si le report vaut le coup à ce prix-là, il le
+      vaut à coup sûr. La grille porte ``supposee`` ;
+    - sinon ``None`` : un jour rouge ne peut pas être exclu.
+    """
+    try:
+        restants = dict(tarifs.get("jours_restants") or {})
+        rouges = restants.get(COULEUR_ROUGE)
+        rouges = None if rouges is None else int(rouges)
+    except (TypeError, ValueError, AttributeError):
+        restants, rouges = {}, None
+
+    def reste(couleur):
+        try:
+            return restants.get(couleur) is None or int(restants[couleur]) > 0
+        except (TypeError, ValueError):
+            return True
+
+    try:
+        couleur = tarifs.get("couleur_demain")
+        if couleur:
+            return {**_grille(tarifs, couleur), "supposee": False}, rouges
+        if rouges is not None and rouges <= 0:
+            autres = [c for c in tarifs["prix"] if c != COULEUR_ROUGE]
+            possibles = [c for c in autres if reste(c)] or autres
+            plus_chere = max(possibles, key=lambda c: float(tarifs["prix"][c]["HP"]))
+            return {**_grille(tarifs, plus_chere), "supposee": True}, rouges
+    except (TypeError, KeyError, ValueError, AttributeError):
+        pass
+    return None, rouges
+
+
+def _grille(tarifs, couleur):
+    """Prix et bornes des heures creuses pour une couleur de ``tarifs_jour``."""
+    prix = tarifs["prix"][couleur]
+    return {
+        "hp": float(prix["HP"]),
+        "hc": float(prix["HC"]),
+        "hc_debut": int(tarifs.get("hc_debut", 22)),
+        "hc_fin": int(tarifs.get("hc_fin", 6)),
+        "couleur": couleur,
+        "libelle": (tarifs.get("libelles") or {}).get(couleur, couleur),
+    }
+
+
+def _minuit_demain(maintenant):
+    """Minuit du lendemain, heure locale.
+
+    Reconstruit depuis la date plutôt qu'en ajoutant 24 h : la nuit d'un
+    changement d'heure, la journée n'en fait pas 24.
+    """
+    demain = maintenant.astimezone().date() + timedelta(days=1)
+    return datetime(demain.year, demain.month, demain.day).astimezone()
+
+
+def _ballon_demain(points):
+    """Créneau que le chauffe-eau prendra sans doute demain, ou ``None``.
+
+    Demain n'est pas encore calculé, mais le ballon reste prioritaire : on
+    lui réserve le créneau que son calcul retiendrait sur la prévision de
+    demain, avec les réglages du moment.
+
+    **Ce n'est pas son créneau définitif**, seulement une estimation
+    grossière pour savoir si une machine peut passer demain. Elle n'est ni
+    mémorisée comme heure de chauffe ni publiée : le vrai créneau sera
+    calculé demain, sur une prévision plus fraîche, et les machines seront
+    replacées autour de lui à ce moment-là. S'il chauffe finalement de nuit,
+    la machine aura simplement évité un créneau qui était libre.
+
+    ``None`` : pas de surplus solaire demain, le ballon chauffera en heures
+    creuses et ne prend rien à la production.
+    """
+    duree = api.duree_chauffe_min()
+    besoin = api.conso_chauffe_eau()
+    if not points or duree <= 0:
+        return None
+    creneau = calcul._meilleur_creneau(
+        sorted(points), duree, api.conso_min_maison(), besoin, mode=api.ajustement()
+    )
+    if creneau is None:
+        return None
+    return {
+        "debut": creneau["debut"],
+        "fin": creneau["debut"] + timedelta(minutes=duree),
+        "kw": besoin / (duree / 60.0),
+        "kwh": besoin,
+    }
+
+
+def _lendemain(maintenant, tarifs):
+    """Ce qu'on sait de demain, pour un cycle qui n'a plus de place aujourd'hui.
+
+    ``{"minuit", "tarifs", "rouge", "rouges_restants", "points", "ballon",
+    "erreur"}`` — ``tarifs`` à ``None`` si un jour rouge ne peut pas être
+    exclu (couleur pas encore publiée, et il reste des jours rouges à
+    tirer). La prévision n'est lue que si elle peut servir : pas un jour
+    rouge, pas sans tarifs.
+    """
+    from core.liaisons import lire_besoin
+
+    grille = (tarifs or {}).get("demain")
+    demain = {
+        "minuit": _minuit_demain(maintenant),
+        "tarifs": grille,
+        "rouge": bool(grille and grille["couleur"] == COULEUR_ROUGE),
+        "rouges_restants": (tarifs or {}).get("rouges_restants"),
+        "points": [],
+        "ballon": None,
+        "erreur": "",
+    }
+    if not grille or demain["rouge"]:
+        return demain
+
+    points, erreur = lire_besoin(MODULE, "prevision_pv_demain")
+    jour = demain["minuit"].date()
+    demain["points"] = [
+        (t, kw) for t, kw in points or [] if t.astimezone().date() == jour
+    ]
+    if not demain["points"]:
+        demain["erreur"] = erreur or "la courbe ne va pas jusqu'à demain"
+    demain["ballon"] = _ballon_demain(demain["points"])
+    return demain
 
 
 def _creneau_ballon(maintenant):
@@ -489,6 +740,15 @@ def calculer(tracer=False, tout_replanifier=False):
     tarifs = _tarifs()
     points, erreur = _prevision(maintenant)
 
+    # Le switch « Optimisé » ne compte pas un jour rouge : la comparaison
+    # avec les heures creuses est alors toujours faite. Et le lendemain
+    # n'est regardé que switch sur off — sur on, un cycle sans place va en
+    # heures creuses, comme tout cycle que la nuit sert mieux.
+    optimise = api.machines_optimise()
+    rouge = bool(tarifs and tarifs["couleur"] == COULEUR_ROUGE)
+    comparer_hc = optimise or rouge
+    lendemain = None if comparer_hc else _lendemain(maintenant, tarifs)
+
     plan = planifier(
         maintenant=maintenant,
         points=points,
@@ -502,6 +762,8 @@ def calculer(tracer=False, tout_replanifier=False):
         tarifs=tarifs,
         ajustement=api.ajustement(),
         deja=[] if tout_replanifier else _cycles_lances(maintenant),
+        comparer_hc=comparer_hc,
+        lendemain=lendemain,
     )
 
     resultat = {
@@ -517,6 +779,17 @@ def calculer(tracer=False, tout_replanifier=False):
         "tarifs": tarifs,
         "ajustement": api.ajustement(),
         "erreur": erreur,
+        "optimise": optimise,
+        "rouge": rouge,
+        "comparer_hc": comparer_hc,
+        # Sans la courbe : elle ne sert qu'au calcul, pas à l'affichage.
+        "lendemain": lendemain and {
+            "tarifs": lendemain["tarifs"],
+            "rouge": lendemain["rouge"],
+            "rouges_restants": lendemain["rouges_restants"],
+            "ballon": lendemain["ballon"],
+            "erreur": lendemain["erreur"],
+        },
     }
     resultat["detail"] = detail_texte(resultat)
     if tracer:
@@ -547,6 +820,8 @@ def _resultat_vide():
         "cycles": [], "non_places": {}, "demandes": api.machines_demandees(),
         "ballon": None, "tarifs": None, "erreur": "", "detail": [],
         "quand": None, "perime": False, "jamais_calcule": True,
+        "optimise": api.machines_optimise(), "rouge": False,
+        "comparer_hc": True, "lendemain": None,
     }
 
 
@@ -556,9 +831,11 @@ def dernier_resultat():
     Source unique pour le tableau de bord, l'onglet et les infos. Ajoute à
     chaque cycle ``passe`` (son heure de lancement est derrière nous) et, au
     plan, ``affichees`` (les cycles encore à lancer — les seuls qu'on
-    montre), ``prochaine`` (le premier d'entre eux), ``restantes`` et les
-    totaux. ``perime`` signale un plan calculé un autre jour : ses heures ne
-    veulent alors plus rien dire.
+    montre), ``prochaine`` (le premier à lancer aujourd'hui, heures creuses
+    de ce soir comprises), ``restantes``, ``reportees`` (ceux conseillés
+    pour demain, avec ``prochaine_demain``) et les totaux. ``perime``
+    signale un plan calculé un autre jour : ses heures ne veulent alors plus
+    rien dire.
     """
     raw = get_setting(CLE_DERNIER, module=MODULE)
     if not raw:
@@ -571,6 +848,11 @@ def dernier_resultat():
     except (ValueError, TypeError, AttributeError, KeyError):
         return _completer(_resultat_vide())
 
+    # Un plan mémorisé avant l'arrivée du switch comparait toujours.
+    resultat.setdefault("optimise", True)
+    resultat.setdefault("rouge", False)
+    resultat.setdefault("comparer_hc", True)
+    resultat.setdefault("lendemain", None)
     resultat["jamais_calcule"] = False
     resultat["perime"] = bool(
         resultat["quand"]
@@ -591,25 +873,37 @@ def _completer(resultat):
     )
 
     a_venir = []
+    reportees = []
     affichees = []
     total = {"kwh": 0.0, "solaire_kwh": 0.0, "import_kwh": 0.0, "cout": 0.0}
     chiffrable = True
     for numero, cycle in enumerate(resultat["cycles"], start=1):
         cycle["numero"] = numero
-        de_nuit = cycle.get("conseil") != "jour"
+        conseil = cycle.get("conseil")
         # Strictement passé : un cycle prévu pour maintenant reste à lancer.
+        # Seul un cycle de jour « passe » : celui de ce soir ou de demain
+        # reste à lancer tant que le plan vaut.
         cycle["passe"] = bool(
-            not de_nuit and cycle.get("debut") and cycle["debut"] < maintenant
+            conseil == "jour" and cycle.get("debut") and cycle["debut"] < maintenant
         )
 
-        # Coût de l'option conseillée : de jour, la part solaire est
-        # gratuite ; de nuit, tout le cycle est acheté en heures creuses.
-        # Un cycle coûte quelques centimes : c'est l'unité lisible.
-        cout = cycle.get("cout_hc") if de_nuit else cycle.get("cout_jour")
+        # Coût de l'option conseillée : de jour (aujourd'hui ou demain), la
+        # part solaire est gratuite ; de nuit, tout le cycle est acheté en
+        # heures creuses. Un cycle coûte quelques centimes : c'est l'unité
+        # lisible.
+        if conseil == "jour":
+            cout = cycle.get("cout_jour")
+        elif conseil == "demain":
+            cout = cycle.get("cout_demain")
+        else:
+            cout = cycle.get("cout_hc")
         cycle["cout_c"] = _centimes(cout)
         cycle["cout_jour_c"] = _centimes(cycle.get("cout_jour"))
         cycle["cout_hc_c"] = _centimes(cycle.get("cout_hc"))
+        cycle["cout_demain_c"] = _centimes(cycle.get("cout_demain"))
         cycle["ecart_c"] = _centimes(cycle.get("ecart"))
+        # Pourquoi ce cycle n'est pas reporté à demain (vide le plus souvent).
+        cycle["raison"] = _MOTIFS.get(cycle.get("motif") or "", "")
 
         # Une machine dont l'heure est passée est supposée lancée : elle
         # reste dans le plan (le calcul en a besoin) mais n'est plus
@@ -618,14 +912,14 @@ def _completer(resultat):
             continue
         affichees.append(cycle)
         if cycle.get("heure"):
-            a_venir.append(cycle)
+            (reportees if conseil == "demain" else a_venir).append(cycle)
 
         total["kwh"] += cycle["kwh"]
-        if de_nuit:
-            total["import_kwh"] += cycle["kwh"]
-        else:
+        if conseil in ("jour", "demain"):
             total["solaire_kwh"] += cycle.get("solaire_kwh") or 0.0
             total["import_kwh"] += cycle.get("import_kwh") or 0.0
+        else:
+            total["import_kwh"] += cycle["kwh"]
         if cout is None:
             chiffrable = False
         else:
@@ -636,13 +930,20 @@ def _completer(resultat):
     total["cout_c"] = _centimes(total["cout"])
     resultat["total"] = total
     resultat["affichees"] = affichees
+    # « À lancer aujourd'hui » : un cycle reporté à demain n'en fait pas
+    # partie — son heure, lue aujourd'hui, déclencherait un rappel à tort.
     resultat["restantes"] = len(a_venir)
+    resultat["reportees"] = len(reportees)
     resultat["nb_passees"] = len(resultat["cycles"]) - len(affichees)
     resultat["a_des_passees"] = resultat["nb_passees"] > 0
     # Les cycles de jour d'abord, dans l'ordre ; ceux de la nuit ensuite.
     a_venir.sort(key=lambda c: (c.get("conseil") != "jour", c.get("debut") or maintenant))
     resultat["prochaine"] = (
         a_venir[0] if a_venir and not resultat.get("perime") else None
+    )
+    reportees.sort(key=lambda c: c.get("debut") or maintenant)
+    resultat["prochaine_demain"] = (
+        reportees[0] if reportees and not resultat.get("perime") else None
     )
     return resultat
 
@@ -653,6 +954,49 @@ def _completer(resultat):
 
 def _hm(instant):
     return instant.astimezone().strftime("%H:%M")
+
+
+def _detail_lendemain(lendemain):
+    """Ce qui a été retenu de demain, pour un cycle sans place aujourd'hui."""
+    if lendemain.get("rouge"):
+        return "Demain est un jour rouge : aucun cycle n'y est reporté."
+    grille = lendemain.get("tarifs")
+    rouges = lendemain.get("rouges_restants")
+    if not grille:
+        compteur = (
+            f"il reste {rouges} jour{'s' if rouges > 1 else ''} rouge"
+            f"{'s' if rouges > 1 else ''} à tirer cette saison"
+            if rouges else "un jour rouge ne peut pas être exclu"
+        )
+        return (
+            f"Couleur de demain pas encore connue, et {compteur} : aucun cycle "
+            f"n'y est reporté."
+        )
+    if grille.get("supposee"):
+        entete = (
+            "Demain (couleur pas encore connue, mais plus aucun jour rouge à "
+            f"tirer cette saison — chiffré en {grille['libelle']}, la plus chère "
+            f"des couleurs possibles : HP {grille['hp']:.4f} €/kWh)"
+        )
+    else:
+        entete = f"Demain ({grille['libelle']}, HP {grille['hp']:.4f} €/kWh)"
+    if lendemain.get("erreur"):
+        return (
+            f"{entete} : pas de prévision ({lendemain['erreur']}), aucun cycle "
+            f"n'y est reporté."
+        )
+    ballon = lendemain.get("ballon")
+    if ballon:
+        return (
+            f"{entete} : chauffe-eau estimé de {_hm(ballon['debut'])} à "
+            f"{_hm(ballon['fin'])} à {ballon['kw']:.2f} kW et retiré de la "
+            f"prévision — estimation grossière, son vrai créneau sera calculé "
+            f"demain."
+        )
+    return (
+        f"{entete} : pas de surplus solaire pour le chauffe-eau, rien n'est "
+        f"retiré de la prévision."
+    )
 
 
 def detail_texte(r):
@@ -705,17 +1049,40 @@ def detail_texte(r):
         )
 
     tarifs = r.get("tarifs")
+    comparer = r.get("comparer_hc", True)
     if tarifs:
         lignes.append(
             f"Tarifs du jour ({tarifs['libelle']}) : HP {tarifs['hp']:.4f} €/kWh, "
             f"HC {tarifs['hc']:.4f} €/kWh à partir de {int(tarifs['hc_debut']) % 24:02d}:00."
         )
+        if r.get("rouge"):
+            lignes.append(
+                "Jour rouge : le switch « Optimisé » n'est pas pris en compte, "
+                "chaque cycle va là où il coûte le moins — sur la production ou "
+                "en heures creuses."
+            )
+        elif comparer:
+            lignes.append(
+                "Switch « Optimisé » sur on : chaque créneau de jour est comparé "
+                "aux heures creuses."
+            )
+        else:
+            lignes.append(
+                "Switch « Optimisé » sur off : les cycles sont placés dans la "
+                "plage de lancement, sans regarder les heures creuses."
+            )
     else:
         lignes.append(
             "Tarifs indisponibles : aucun coût chiffrable, les créneaux sont "
             "classés sur l'énergie achetée au réseau, sans comparaison avec "
             "les heures creuses."
         )
+
+    lendemain = r.get("lendemain")
+    if lendemain and any(
+        str(c.get("motif") or "").startswith("demain") for c in r["cycles"]
+    ):
+        lignes.append(_detail_lendemain(lendemain))
 
     for numero, c in enumerate(r["cycles"], start=1):
         nom = f"{c['libelle']} n° {numero}"
@@ -724,13 +1091,41 @@ def detail_texte(r):
                 f"{nom} : lancé à {_hm(c['debut'])} d'après le plan précédent, conservé."
             )
             continue
+        if c.get("conseil") == "demain":
+            ligne = (
+                f"{nom} : plus de créneau libre aujourd'hui → demain "
+                f"{_hm(c['debut'])}–{_hm(c['fin'])}, "
+                f"{c['solaire_kwh']:.2f} kWh couverts par le solaire, "
+                f"{c['import_kwh']:.2f} kWh achetés au réseau"
+            )
+            if c.get("avec_ballon"):
+                ligne += (
+                    " (en même temps que le chauffe-eau estimé, le solaire "
+                    "couvre les deux)"
+                )
+            lignes.append(
+                ligne
+                + f" → {c['cout_demain']:.3f} € contre {c['cout_hc']:.3f} € en heures "
+                f"creuses ce soir. DÉCISION : lancer demain à {c['heure']} "
+                f"(écart {c['ecart']:.3f} €)."
+            )
+            continue
         if not c.get("debut"):
+            pourquoi = ""
+            if c.get("motif") == "demain_plus_cher":
+                pourquoi = (
+                    f" ; demain à {_hm(c['demain_debut'])} coûterait "
+                    f"{c['cout_demain']:.3f} €, pas moins que les heures creuses"
+                )
+            elif c.get("motif") in _MOTIFS:
+                pourquoi = " ; " + _MOTIFS[c["motif"]]
             suite = (
                 f"heures creuses à partir de {c['heure']} ({c['cout_hc']:.3f} €)"
                 if c.get("conseil") == "hc" else "à reporter"
             )
             lignes.append(
-                f"{nom} : plus de créneau libre dans la plage de lancement → {suite}."
+                f"{nom} : plus de créneau libre dans la plage de lancement"
+                f"{pourquoi} → {suite}."
             )
             continue
 
@@ -741,11 +1136,13 @@ def detail_texte(r):
         )
         if c.get("avec_ballon"):
             ligne += " (en même temps que le chauffe-eau, le solaire couvre les deux)"
-        if c.get("cout_hc") is not None:
+        if c.get("cout_hc") is not None and comparer:
             ligne += (
                 f" → {c['cout_jour']:.3f} € de jour contre {c['cout_hc']:.3f} € "
                 f"en heures creuses"
             )
+        elif c.get("cout_jour") is not None:
+            ligne += f" → {c['cout_jour']:.3f} €"
         if c.get("conseil") == "hc":
             ligne += (
                 f". DÉCISION : heures creuses, à partir de {c['heure']} "

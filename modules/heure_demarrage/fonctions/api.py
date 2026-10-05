@@ -48,6 +48,13 @@ REGLAGES_MACHINES = [
 
 DEFAUTS = {k: d for k, d, _t in REGLAGES + REGLAGES_MACHINES}
 
+# Switch « Optimisé » du bloc Machines. Tenu hors de REGLAGES_MACHINES : il
+# ne se règle pas dans le formulaire du profil, qui l'éteindrait à chaque
+# enregistrement (une case absente d'un formulaire vaut « décochée »). Et
+# sans rapport avec le réglage « optimiser » ci-dessus, qui ne concerne que
+# le chauffe-eau.
+CLE_MACHINES_OPTIMISE = "machines_optimise"
+
 # Les deux cycles connus de la machine, dans l'ordre d'affichage.
 TYPES_MACHINE = [("normal", "Cycle normal"), ("court", "Cycle court")]
 
@@ -253,6 +260,27 @@ def set_machines_demandees(normal=None, court=None):
             f"machines_{type_cycle}", str(max(0, min(MAX_MACHINES, n))), module=MODULE
         )
     return machines_demandees()
+
+
+def machines_optimise():
+    """État du switch « Optimisé » des machines. « on » par défaut.
+
+    - « on » : chaque créneau de jour est comparé aux heures creuses, et la
+      machine est conseillée la nuit si elle y coûte moins ;
+    - « off » : les machines sont placées dans la plage de lancement, sans
+      regarder les heures creuses.
+
+    Un jour rouge, le calcul ne tient pas compte de ce switch (voir
+    ``machines.calculer``) : l'état enregistré, lui, ne change pas.
+    """
+    valeur = str(get_setting(CLE_MACHINES_OPTIMISE, module=MODULE, default="oui"))
+    return valeur.strip().lower() not in ("non", "false", "0", "off")
+
+
+def set_machines_optimise(actif):
+    """Enregistre l'état du switch « Optimisé » et retourne l'état lu."""
+    set_setting(CLE_MACHINES_OPTIMISE, "oui" if actif else "non", module=MODULE)
+    return machines_optimise()
 
 
 def tache_actualiser(arbitrage="nuit"):

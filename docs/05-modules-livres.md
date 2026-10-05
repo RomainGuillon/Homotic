@@ -232,9 +232,43 @@ seulement la moitié d'une salve à 2 kW — c'est cette fraction qui est
 comptée, pas la moyenne. Les valeurs par défaut viennent d'un relevé sur une
 prise connectée ; les mesurer sur sa propre machine prend une semaine.
 
-**Chaque créneau est comparé aux heures creuses.** Si lancer la machine la
-nuit coûte moins cher que le meilleur créneau du jour — journée sans soleil,
-et presque toujours en jour rouge — le module le dit et donne l'écart.
+**Le switch « Optimisé »** — dans le bloc « Machines » du tableau de bord et
+dans l'onglet — décide de ce qu'on fait des heures creuses. Le basculer
+refait le plan aussitôt.
+
+- **On** (par défaut) : chaque créneau est comparé aux heures creuses. Si
+  lancer la machine la nuit coûte moins cher que le meilleur créneau du jour
+  — une journée sans soleil — le module le dit et donne l'écart.
+- **Off** : les machines sont placées dans la plage de lancement (« Lancement
+  dès / jusqu'à » du profil), sans regarder les heures creuses.
+
+**Un jour rouge, le switch n'est pas pris en compte** : chaque machine va là
+où elle revient le moins cher, sur la production solaire ou en heures
+creuses. L'écran le signale ; l'état du switch, lui, n'est pas modifié.
+
+**Switch sur off, et plus de place dans la plage** (journée trop chargée,
+calcul lancé trop tard) : la machine qui reste n'est pas abandonnée.
+
+1. Demain est rouge → heures creuses de ce soir. Elles relèvent encore de la
+   couleur d'aujourd'hui.
+2. Demain n'est pas rouge → le module regarde la prévision solaire de
+   demain, dans la même plage de lancement, et reporte la machine à demain
+   si elle y coûte moins que les heures creuses de ce soir.
+3. Sinon → heures creuses de ce soir.
+
+Deux précisions sur le point 2. Tant que la couleur de demain n'est pas
+publiée (elle l'est vers 11 h), un jour rouge ne peut pas être exclu : c'est
+le cas 3 qui s'applique — sauf s'il ne reste **plus aucun jour rouge** à
+tirer cette saison, auquel cas demain est chiffré au tarif de la plus chère
+des couleurs encore possibles. Et le chauffe-eau reste prioritaire demain
+aussi : son calcul n'a pas encore eu lieu, le module lui réserve donc le
+créneau solaire qu'il retiendrait sur la prévision de demain. C'est une
+**estimation grossière**, qui ne sert qu'à savoir si la machine peut passer ;
+elle n'est ni affichée comme heure de chauffe ni utilisée par les scénarios,
+et le vrai créneau sera calculé le lendemain.
+
+Un report vaut pour le jour où il est calculé : le lendemain, le plan est
+signalé comme périmé et se recalcule sur une prévision plus fraîche.
 
 **Une machine dont l'heure est passée disparaît de l'affichage.** Elle est
 supposée lancée : sa ligne n'est plus montrée, ni sur le tableau de bord ni
@@ -245,8 +279,17 @@ le plan des machines, puisqu'elles se placent autour de lui.
 
 Action de scénario : `recalculer_machines`, avec le nombre de cycles en
 paramètres facultatifs (vides = inchangés). Infos : `prochaine_machine`
-(heure du prochain lancement), `machines_restantes`, `plan_machines` (ce
-qui reste à lancer, en clair).
+(heure du prochain lancement **d'aujourd'hui**, heures creuses de ce soir
+comprises — jamais celle d'une machine reportée à demain, qui déclencherait
+un scénario un jour trop tôt), `machines_restantes` (à lancer aujourd'hui),
+`plan_machines` (ce qui reste à lancer, en clair : « 11:00 normal · 22:00
+court (HC) · 10:30 normal (demain) »).
+
+Le report au lendemain a besoin de deux données : la prévision solaire de
+demain (besoin facultatif `prevision_pv_demain`, branché d'office sur
+Solaire) et, dans l'objet `tarifs_jour`, la couleur de demain et les jours
+restants de la saison. Sans la première, une machine sans place va toujours
+en heures creuses.
 
 ## Tempo
 

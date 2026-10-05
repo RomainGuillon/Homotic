@@ -1,6 +1,7 @@
 {# Bloc tableau de bord : heures de lancement des machines (lave-linge lancé à la main). #}
+<div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-3">
 <form method="post" action="{% url 'core:module_tab' 'heure_demarrage' %}"
-      class="d-flex flex-wrap align-items-end gap-2 mb-3">
+      class="d-flex flex-wrap align-items-end gap-2">
   {% csrf_token %}
   <input type="hidden" name="action" value="machines">
   <input type="hidden" name="retour" value="dashboard">
@@ -24,6 +25,8 @@
       Tout replanifier</button>
   {% endif %}
 </form>
+{% include "heure_demarrage/_switch_optimise.html" with retour="dashboard" suffixe="Bloc" %}
+</div>
 
 {% if p.jamais_calcule %}
   <p class="text-secondary small mb-0">Indiquer le nombre de machines à faire aujourd'hui,
@@ -41,14 +44,20 @@
     <div class="d-flex justify-content-between align-items-center py-2 {% if not forloop.last %}border-bottom{% endif %}">
       <div>
         <span class="fs-4 fw-bold lh-1"
-              style="color:{% if c.conseil == 'jour' %}#f59e0b{% else %}#93c5fd{% endif %}">
+              style="color:{% if c.conseil == 'jour' %}#f59e0b{% elif c.conseil == 'demain' %}#c4b5fd{% else %}#93c5fd{% endif %}">
           {{ c.heure|default:"—" }}</span>
         <span class="ms-2">{{ c.libelle }}</span>
         <div class="small text-secondary">
           {% if c.conseil == "hc" %}
             heures creuses, à partir de {{ c.heure }}
             {% if c.debut %}— moins cher qu'à {{ c.debut|date:"H:i" }}
-              ({{ c.cout_jour_c|floatformat:1 }} cts){% else %}— plus de créneau en journée{% endif %}
+              ({{ c.cout_jour_c|floatformat:1 }} cts)
+            {% elif c.raison %}— plus de créneau aujourd'hui, {{ c.raison }}
+            {% else %}— plus de créneau en journée{% endif %}
+          {% elif c.conseil == "demain" %}
+            {# Pas de mention du chauffe-eau : son créneau de demain n'est qu'estimé. #}
+            <strong>demain</strong>, jusqu'à {{ c.fin|date:"H:i" }} ·
+            solaire {{ c.solaire_kwh|floatformat:2 }} sur {{ c.kwh|floatformat:2 }} kWh
           {% elif c.conseil == "jour" %}
             jusqu'à {{ c.fin|date:"H:i" }} ·
             solaire {{ c.solaire_kwh|floatformat:2 }} sur {{ c.kwh|floatformat:2 }} kWh
