@@ -81,6 +81,14 @@ alimentés par l'**historique local de l'Envoy**, un point toutes les
 - L'historique est **remis à zéro chaque jour** : une courbe vide en début
   de matinée est normale.
 
+Quand le compte cloud Enphase est lié, la courbe « réel » du module Solaire
+part de la courbe 15 min du cloud, relevée toutes les deux heures seulement
+(quota du plan), puis est **prolongée jusqu'à maintenant par l'historique
+local**, ramené au même pas de 15 minutes. Elle a donc au plus un quart
+d'heure de retard, sans appel supplémentaire ; une courbe qui s'arrête
+net plus tôt signifie que l'Envoy lui-même n'est plus relevé (scheduler
+arrêté ou passerelle injoignable — voir le Journal).
+
 ## Un module n'apparaît pas
 
 | Symptôme | Cause probable |

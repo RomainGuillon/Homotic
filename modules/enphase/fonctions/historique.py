@@ -20,7 +20,7 @@ changement de jour. Un point tous les 5 minutes (288 au maximum) : la clé
 """
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from core.services import get_setting, set_setting
 
@@ -117,3 +117,41 @@ def points_du_jour():
     Conservé pour la courbe « réel » du module Solaire.
     """
     return [(t, prod) for t, prod, _conso, _reseau in mesures_du_jour()]
+
+
+def _maintenant():
+    """Heure locale courante — isolée pour pouvoir être figée dans les tests."""
+    return datetime.now().astimezone()
+
+
+def points_par_pas(pas_minutes=15, depuis=None):
+    """Production mesurée aujourd'hui, moyennée par pas : [(datetime, kW)].
+
+    Sert à **prolonger une courbe venue d'ailleurs** (le cloud Enlighten,
+    relevé toutes les deux heures pour tenir son quota) avec ce que l'Envoy
+    a mesuré depuis : même pas, même convention d'horodatage — le milieu du
+    pas —, pour que les deux morceaux se raccordent sans couture et que les
+    kWh par heure restent justes (ils se calculent en kW × durée du pas, et
+    un mélange de pas de 15 et de 5 minutes les fausserait).
+
+    - ``depuis`` : ne rend que les pas qui commencent à cette heure ou
+      après (typiquement la fin du dernier pas connu du cloud) ;
+    - un pas encore en cours n'est pas rendu : sa moyenne changerait à
+      chaque mesure, et il compterait pour un pas entier dans les kWh.
+    """
+    pas = timedelta(minutes=pas_minutes)
+    maintenant = _maintenant()
+
+    seaux = {}
+    for quand, prod, _conso, _reseau in mesures_du_jour():
+        debut = quand - timedelta(minutes=quand.minute % pas_minutes)
+        if depuis is not None and debut < depuis:
+            continue
+        if debut + pas > maintenant:
+            continue
+        seaux.setdefault(debut, []).append(prod)
+
+    return [
+        (debut + pas / 2, round(sum(valeurs) / len(valeurs), 3))
+        for debut, valeurs in sorted(seaux.items())
+    ]

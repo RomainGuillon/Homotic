@@ -15,7 +15,7 @@ journée de zéro — le défaut qui, le 11 septembre 2026, a fait afficher
 """
 
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from unittest import mock
 
 from django.test import RequestFactory, TestCase
@@ -338,3 +338,101 @@ class CloudSecrets(TestCase):
         masque = self.masquer("429 Too Many Requests sur .../summary?key=abc&granularity=day")
         self.assertIn("429 Too Many Requests", masque)
         self.assertIn("granularity=day", masque)
+
+
+class CourbeReelle(TestCase):
+    """La courbe « réel » ne doit pas attendre le relevé cloud suivant.
+
+    Le 5 octobre 2026 à 11h26, la courbe bleue du module Solaire s'arrêtait
+    vers 9h30 : dès que le compte cloud est lié, ``production_reelle`` ne
+    rendait que la courbe du cloud, relevée toutes les deux heures pour tenir
+    le quota. L'Envoy, lui, avait mesuré la production toutes les 5 minutes
+    entre-temps — ces mesures restaient inutilisées.
+    """
+
+    def setUp(self):
+        from .fonctions import cloud, historique, info
+
+        self.cloud, self.historique, self.info = cloud, historique, info
+        self.jour = date.today()
+
+    def _a(self, heure, minute=0):
+        return datetime(self.jour.year, self.jour.month, self.jour.day,
+                        heure, minute).astimezone()
+
+    def _local(self, points):
+        """Historique de l'Envoy : {"HH:MM": kW produits}."""
+        set_setting(
+            self.historique.CLE,
+            json.dumps({"jour": str(self.jour),
+                        "points": {k: [v, 0.5, 0.0] for k, v in points.items()}}),
+            module=api.MODULE,
+        )
+
+    def _cloud(self, fins):
+        """Courbe cloud : {(heure, minute) de fin de pas: kW}."""
+        return [{"end_at": self._a(h, m).timestamp(), "kw": kw}
+                for (h, m), kw in sorted(fins.items())]
+
+    def _lire(self, maintenant, courbe_cloud=None):
+        with mock.patch.object(self.cloud, "cloud_configured",
+                               return_value=courbe_cloud is not None), \
+             mock.patch.object(self.cloud, "get_production_curve_cached",
+                               return_value=(courbe_cloud, None, "")), \
+             mock.patch.object(self.historique, "_maintenant",
+                               return_value=maintenant):
+            return self.info.production_reelle()
+
+    def test_l_envoy_prolonge_la_courbe_du_cloud(self):
+        # Cloud relevé à 9h50 : dernier pas clos à 9h45. Il est 11h26.
+        cloud = self._cloud({(9, 30): 0.4, (9, 45): 0.6})
+        self._local({
+            "09:30": 0.5, "09:35": 0.6, "09:40": 0.7,   # déjà dans le cloud
+            "09:45": 0.8, "09:50": 0.9, "09:55": 1.0,   # pas 9h45-10h00
+            "10:00": 1.2, "10:05": 1.2, "10:10": 1.2,   # pas 10h00-10h15
+            "11:00": 2.0, "11:05": 2.1, "11:10": 2.2,   # pas 11h00-11h15
+            "11:15": 2.3, "11:20": 2.3, "11:25": 2.3,   # pas en cours
+        })
+        points = self._lire(self._a(11, 26), cloud)
+        self.assertEqual(
+            [(t.strftime("%H:%M:%S"), kw) for t, kw in points],
+            [
+                ("09:22:30", 0.4), ("09:37:30", 0.6),               # cloud
+                ("09:52:30", 0.9), ("10:07:30", 1.2), ("11:07:30", 2.1),  # Envoy
+            ],
+        )
+
+    def test_le_pas_en_cours_n_est_pas_rendu(self):
+        cloud = self._cloud({(9, 45): 0.6})
+        self._local({"11:15": 2.3, "11:20": 2.3, "11:25": 2.3})
+        self.assertEqual(len(self._lire(self._a(11, 29), cloud)), 1)
+        # À 11h30 pile, le pas 11h15-11h30 est clos : il entre dans la courbe.
+        points = self._lire(self._a(11, 30), cloud)
+        self.assertEqual(points[-1], (self._a(11, 22) + timedelta(seconds=30), 2.3))
+
+    def test_le_pas_reste_de_15_minutes_de_bout_en_bout(self):
+        # Le tableau horaire du module Solaire calcule les kWh en kW × pas,
+        # le pas étant déduit des horodatages : il doit rester uniforme.
+        cloud = self._cloud({(9, 15): 0.2, (9, 30): 0.4, (9, 45): 0.6})
+        self._local({f"{h:02d}:{m:02d}": 1.0
+                     for h in (9, 10) for m in range(0, 60, 5)})
+        points = self._lire(self._a(11, 0), cloud)
+        ecarts = {(b[0] - a[0]).total_seconds() for a, b in zip(points, points[1:])}
+        self.assertEqual(ecarts, {900.0})
+        self.assertEqual(len(points), 3 + 5)  # 9h45 → 11h00 : cinq pas de l'Envoy
+
+    def test_un_cloud_a_jour_n_est_pas_modifie(self):
+        cloud = self._cloud({(11, 0): 2.0, (11, 15): 2.2})
+        self._local({"11:00": 9.0, "11:05": 9.0, "11:10": 9.0, "11:15": 9.0})
+        points = self._lire(self._a(11, 20), cloud)
+        self.assertEqual([kw for _t, kw in points], [2.0, 2.2])
+
+    def test_sans_cloud_l_historique_local_sert_seul(self):
+        self._local({"09:00": 0.3, "09:05": 0.4})
+        points = self._lire(self._a(9, 7))
+        self.assertEqual(points, [(self._a(9, 0), 0.3), (self._a(9, 5), 0.4)])
+
+    def test_cloud_lie_mais_vide_repli_sur_l_historique_local(self):
+        self._local({"09:00": 0.3, "09:05": 0.4})
+        points = self._lire(self._a(9, 7), courbe_cloud=[])
+        self.assertEqual([kw for _t, kw in points], [0.3, 0.4])

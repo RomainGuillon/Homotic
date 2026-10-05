@@ -733,6 +733,8 @@ The "real" curve of the Solar module and the Energy module chart are fed by the 
 - If the scheduler is not running, the history only advances when a page is displayed.
 - The history is **reset every day**: an empty curve early in the morning is normal.
 
+When the Enphase cloud account is linked, the "real" curve of the Solar module starts from the cloud's 15-minute curve, read only every two hours (plan quota), and is then **extended up to now by the local history**, brought to the same 15-minute step. It is therefore at most a quarter of an hour late, with no extra call; a curve that stops dead earlier means the Envoy itself is no longer being read (scheduler stopped or gateway unreachable — see the Journal).
+
 ## A module does not appear
 
 | Symptom | Likely cause |

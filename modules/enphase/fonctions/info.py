@@ -60,11 +60,24 @@ def conso_jour_kwh():
 def production_reelle():
     """Courbe de production mesurée aujourd'hui : ``[(datetime, kW)]``.
 
-    Liaison entre modules (type « serie », unité kW). Deux sources, la plus
-    fidèle d'abord : la courbe 15 min du cloud Enlighten si le compte est
-    lié, sinon l'historique local de l'Envoy. Le décalage de 450 s ramène
-    l'horodatage de fin de pas au milieu du pas — un détail de format
-    Enphase, qui n'a rien à faire chez le consommateur.
+    Liaison entre modules (type « serie », unité kW). Deux sources qui se
+    complètent quand le compte cloud est lié :
+
+    - la courbe 15 min du cloud Enlighten, la plus fidèle (énergie comptée
+      sur chaque pas), mais relevée toutes les deux heures seulement pour
+      tenir le quota du plan — seule, elle laisse la courbe figée jusqu'au
+      relevé suivant ;
+    - l'historique local de l'Envoy, mesuré toutes les 5 minutes sans
+      quota, qui **prolonge la courbe du cloud jusqu'à maintenant**, ramené
+      au même pas de 15 min. Au relevé cloud suivant, ces points cèdent la
+      place aux valeurs du cloud.
+
+    Sans cloud (non lié, ou sans donnée pour aujourd'hui), l'historique
+    local sert seul, à son pas de 5 min.
+
+    Le décalage de 450 s ramène l'horodatage de fin de pas au milieu du
+    pas — un détail de format Enphase, qui n'a rien à faire chez le
+    consommateur.
     """
     from datetime import datetime
 
@@ -73,12 +86,15 @@ def production_reelle():
     try:
         if cloud.cloud_configured():
             curve, _ts, _err = cloud.get_production_curve_cached()
-            points = [
-                (datetime.fromtimestamp(p["end_at"] - 450).astimezone(), p["kw"])
-                for p in (curve or [])
-            ]
-            if points:
-                return points
+            if curve:
+                points = [
+                    (datetime.fromtimestamp(p["end_at"] - 450).astimezone(), p["kw"])
+                    for p in curve
+                ]
+                fin_cloud = datetime.fromtimestamp(
+                    max(p["end_at"] for p in curve)
+                ).astimezone()
+                return points + historique.points_par_pas(15, depuis=fin_cloud)
         return historique.points_du_jour()
     except Exception:
         return None

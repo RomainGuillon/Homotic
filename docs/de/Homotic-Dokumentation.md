@@ -734,6 +734,8 @@ Die Kurve „real" des Moduls Solar und das Diagramm des Moduls Energie werden a
 - Läuft der Scheduler nicht, wächst die Historie nur, wenn eine Seite angezeigt wird.
 - Die Historie wird **täglich zurückgesetzt**: Eine leere Kurve am frühen Morgen ist normal.
 
+Ist das Enphase-Cloud-Konto verknüpft, beginnt die Kurve „real" des Moduls Solar mit der 15-Minuten-Kurve der Cloud, die nur alle zwei Stunden abgerufen wird (Kontingent des Tarifs), und wird dann **durch die lokale Historie bis zum aktuellen Zeitpunkt fortgesetzt**, auf dasselbe 15-Minuten-Raster gebracht. Sie hinkt also höchstens eine Viertelstunde hinterher, ohne zusätzlichen Aufruf; endet die Kurve deutlich früher, wird der Envoy selbst nicht mehr abgefragt (Scheduler gestoppt oder Gateway nicht erreichbar — siehe Journal).
+
 ## Ein Modul erscheint nicht
 
 | Symptom | Wahrscheinliche Ursache |
