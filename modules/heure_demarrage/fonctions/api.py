@@ -44,6 +44,7 @@ REGLAGES_MACHINES = [
     ("machine_plage_debut", "08:00", "heure"),
     ("machine_plage_fin", "20:00", "heure"),
     ("machine_pause_min", "30", "int0"),
+    ("machine_tolerance_cts", "1.00", "float"),
 ]
 
 DEFAUTS = {k: d for k, d, _t in REGLAGES + REGLAGES_MACHINES}
@@ -226,6 +227,18 @@ def plage_machines():
 def pause_machines_min():
     """Délai entre la fin d'un cycle et le lancement du suivant (minutes)."""
     return max(0, _int("machine_pause_min"))
+
+
+def tolerance_machines_cts():
+    """Surcoût admis par cycle pour ne pas attendre le meilleur créneau (centimes).
+
+    Le planificateur classe les créneaux au dixième de centime — plus fin
+    que l'erreur d'une prévision solaire. Avec une tolérance, deux créneaux
+    qui se valent à ce prix près sont tenus pour équivalents, et c'est le
+    réglage « ajustement » qui choisit entre eux. À 0, le créneau le moins
+    cher gagne toujours, comme avant.
+    """
+    return max(0.0, _float("machine_tolerance_cts"))
 
 
 def machines_demandees():

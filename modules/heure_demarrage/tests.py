@@ -70,6 +70,19 @@ def plateau(kw, debut=8, fin=18):
     return courbe(lambda h: kw if debut <= h < fin else 0.0)
 
 
+def montee(minuit=MINUIT):
+    """Matinée qui monte : 0,5 kW de plus par heure dès 7 h, jusqu'à 3 kW.
+
+    Le cycle normal y devient gratuit à 11 h 30 ; avant, chaque demi-heure
+    d'avance coûte un peu moins d'un demi-centime de plus (0,98 ct à
+    10 h 10, 2,93 ct à 8 h).
+    """
+    return courbe(
+        lambda h: max(0.0, min(3.0, 0.5 * (h - 7))) if h < 18 else 0.0,
+        minuit=minuit,
+    )
+
+
 DEMAIN = MINUIT + timedelta(days=1)
 
 
@@ -367,6 +380,92 @@ class PlanDesMachines(SimpleTestCase):
         self.assertEqual(pic["import_kwh"], 0.0)
         self.assertTrue(a(12) <= pic["debut"] <= a(13), pic["debut"])
 
+    # --- Tolérance ---
+
+    def test_sans_tolerance_le_creneau_le_moins_cher_gagne(self):
+        cycle, = plan(points=montee())["cycles"]
+        self.assertEqual(cycle["debut"], a(11, 30))
+        self.assertEqual(cycle["cout_jour"], 0.0)
+        self.assertIsNone(cycle["meilleur_debut"])
+        self.assertIsNone(cycle["surcout"])
+
+    def test_la_tolerance_avance_le_cycle(self):
+        """1 ct admis : 10 h 10 coûte 0,98 ct de plus que 11 h 30, 10 h en
+        coûterait 1,07. Le cycle part à 10 h 10 et dit ce qu'il a quitté."""
+        cycle, = plan(points=montee(), tolerance=0.01)["cycles"]
+        self.assertEqual(cycle["debut"], a(10, 10))
+        self.assertEqual(cycle["conseil"], "jour")
+        self.assertEqual(cycle["meilleur_debut"], a(11, 30))
+        self.assertAlmostEqual(cycle["surcout"], cycle["cout_jour"])
+        self.assertTrue(0.009 < cycle["surcout"] <= 0.01, cycle["surcout"])
+
+    def test_la_tolerance_se_mesure_depuis_le_meilleur_creneau(self):
+        cycle, = plan(points=montee(), tolerance=0.005)["cycles"]
+        self.assertEqual(cycle["debut"], a(10, 50))
+
+    def test_la_tolerance_n_avance_pas_dans_le_passe(self):
+        cycle, = plan(points=montee(), maintenant=a(10, 33), tolerance=0.05)["cycles"]
+        self.assertEqual(cycle["debut"], a(10, 40))
+
+    def test_la_tolerance_respecte_le_chauffe_eau(self):
+        """3 ct admis : sans ballon, le cycle partirait dès 8 h. Le ballon
+        chauffe de 9 h à 10 h et le solaire ne couvre pas les deux : aucun
+        départ qui le chevauche, la machine attend 10 h."""
+        libre, = plan(points=montee(), tolerance=0.03)["cycles"]
+        self.assertEqual(libre["debut"], a(8))
+        ballon = {"debut": a(9), "fin": a(10), "kw": 2.4}
+        cycle, = plan(points=montee(), ballon=ballon, tolerance=0.03)["cycles"]
+        self.assertEqual(cycle["debut"], a(10))
+        self.assertFalse(cycle["avec_ballon"])
+
+    def test_la_tolerance_tient_la_pause_entre_deux_cycles(self):
+        resultat = plan(
+            points=montee(), demandes={"normal": 2, "court": 0}, tolerance=0.01
+        )
+        premier, second = resultat["cycles"]
+        self.assertEqual(premier["debut"], a(10, 10))
+        # 70 min de cycle + 30 min de pause
+        self.assertEqual(second["debut"], a(11, 50))
+        self.assertEqual(resultat["non_places"], {})
+
+    def test_la_tolerance_ne_fait_pas_basculer_en_heures_creuses(self):
+        """La nuit à 0,6 ct le cycle : de jour il est gratuit à 11 h 30,
+        donc conseillé de jour. La tolérance ne l'avance pas jusqu'à
+        10 h 10 (0,98 ct), où la nuit redeviendrait moins chère."""
+        nuit_bradee = {**BLEU, "hc": 0.02}
+        cycle, = plan(points=montee(), tarifs=nuit_bradee, tolerance=0.01)["cycles"]
+        self.assertEqual(cycle["conseil"], "jour")
+        self.assertEqual(cycle["debut"], a(10, 40))
+        self.assertLess(cycle["cout_jour"], cycle["cout_hc"])
+
+    def test_la_tolerance_ne_fait_pas_perdre_le_report_a_demain(self):
+        """Plus de place aujourd'hui, switch sur off. Ce soir la nuit coûte
+        1,5 ct ; demain le cycle est gratuit à 11 h 30. Avec 5 ct admis il
+        n'est avancé que là où il reste moins cher que ce soir."""
+        cycle, = self._sans_place(
+            tarifs={**BLEU, "hc": 0.05}, tolerance=0.05,
+            lendemain=lendemain(points=montee(DEMAIN)),
+        )["cycles"]
+        self.assertEqual(cycle["conseil"], "demain")
+        self.assertLess(cycle["cout_demain"], cycle["cout_hc"])
+        self.assertEqual(cycle["debut"], DEMAIN + timedelta(hours=9, minutes=40))
+        self.assertEqual(
+            cycle["meilleur_debut"], DEMAIN + timedelta(hours=11, minutes=30)
+        )
+
+    def test_la_tolerance_ne_deplace_rien_a_production_egale(self):
+        """Ajustement « max » sous un plateau : tous les créneaux se valent,
+        le cycle reste où le plan l'avait mis."""
+        sans, = plan(ajustement="max")["cycles"]
+        avec, = plan(ajustement="max", tolerance=0.01)["cycles"]
+        self.assertEqual(avec["debut"], sans["debut"])
+        self.assertIsNone(avec["meilleur_debut"])
+
+    def test_sans_tarifs_la_tolerance_ne_joue_pas(self):
+        sans, = plan(points=montee(), tarifs=None)["cycles"]
+        avec, = plan(points=montee(), tarifs=None, tolerance=0.01)["cycles"]
+        self.assertEqual(avec["debut"], sans["debut"])
+
     # --- Cycles déjà lancés ---
 
     def test_un_cycle_deja_lance_est_conserve(self):
@@ -491,6 +590,27 @@ class CalculDesMachines(TestCase):
         self.assertEqual(resultat["cycles"][0]["heure"], "09:00")
         self.assertEqual(resultat["ballon"]["kw"], 2.4)
         self.assertEqual(get_setting(calcul.CLE_DERNIER, module=api.MODULE), avant)
+
+    def test_la_tolerance_vient_du_reglage(self):
+        """1 ct par défaut : le cycle est avancé, le détail le dit, et le
+        plan relu garde le créneau quitté. À 0, le moins cher gagne."""
+        points = montee(datetime(2026, 10, 4).astimezone())
+        with Horloge(7), _besoins(points, _tarifs_tempo()):
+            resultat = machines.calculer()
+            relu = machines.dernier_resultat()
+            set_setting("machine_tolerance_cts", "0", module=api.MODULE)
+            strict = machines.calculer()
+        cycle, = resultat["cycles"]
+        self.assertEqual(cycle["heure"], "10:10")
+        self.assertEqual(resultat["tolerance_cts"], 1.0)
+        detail = " ".join(resultat["detail"])
+        self.assertIn("Tolérance de 1.0 ct par cycle", detail)
+        self.assertIn("Le créneau le moins cher était 11:30 : avancé pour", detail)
+        self.assertEqual(
+            relu["cycles"][0]["meilleur_debut"], cycle["meilleur_debut"]
+        )
+        self.assertEqual(strict["cycles"][0]["heure"], "11:30")
+        self.assertNotIn("Tolérance", " ".join(strict["detail"]))
 
     def test_sans_calcul_du_ballon_rien_n_est_retire(self):
         with Horloge(7), _besoins(_soleil(), _tarifs_tempo()):
@@ -849,6 +969,11 @@ class ReglagesDesMachines(TestCase):
         profil = api.profil_machine("normal")
         self.assertEqual(profil["chauffe_min"], 40)
         self.assertEqual(profil["chauffe_kwh"], profil["kwh"])
+
+    def test_tolerance_par_defaut_et_jamais_negative(self):
+        self.assertEqual(api.tolerance_machines_cts(), 1.0)
+        set_setting("machine_tolerance_cts", "-2", module=api.MODULE)
+        self.assertEqual(api.tolerance_machines_cts(), 0.0)
 
     def test_type_de_cycle_inconnu(self):
         with self.assertRaises(ValueError):
@@ -1417,12 +1542,16 @@ class PagesDuModule(TestCase):
         champs = {k: d for k, d, _t in api.REGLAGES_MACHINES}
         champs.update(action="machines_params", machine_normal_duree="95",
                       machine_normal_kwh="0,85", machine_pause_min="0",
-                      machine_plage_debut="09:30")
+                      machine_plage_debut="09:30", machine_tolerance_cts="0,5")
         reponse = self.client.post(self.URL, champs)
         self.assertRedirects(reponse, self.URL)
         profil = api.profil_machine("normal")
         self.assertEqual((profil["duree_min"], profil["kwh"]), (95, 0.85))
         self.assertEqual(api.pause_machines_min(), 0)
+        self.assertEqual(api.tolerance_machines_cts(), 0.5)
+        self.assertContains(
+            self.client.get(self.URL), 'name="machine_tolerance_cts"'
+        )
         self.assertEqual(api.plage_machines(), ("09:30", "20:00"))
 
     def test_saisie_illisible_garde_l_ancienne_valeur(self):

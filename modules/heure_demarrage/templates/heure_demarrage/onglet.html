@@ -313,6 +313,11 @@
           <input type="number" name="machine_pause_min" class="form-control" min="0" value="{{ machine.pause_min }}">
           <div class="form-text">minutes entre deux cycles</div>
         </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label">Tolérance</label>
+          <input type="text" name="machine_tolerance_cts" class="form-control" value="{{ machine.tolerance_cts }}">
+          <div class="form-text">centimes admis par cycle pour ne pas attendre · 0 = aucune</div>
+        </div>
       </div>
       <button class="btn btn-primary">Enregistrer</button>
     </form>

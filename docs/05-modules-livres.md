@@ -246,6 +246,22 @@ seulement la moitié d'une salve à 2 kW — c'est cette fraction qui est
 comptée, pas la moyenne. Les valeurs par défaut viennent d'un relevé sur une
 prise connectée ; les mesurer sur sa propre machine prend une semaine.
 
+**La tolérance** (carte « Profil des machines », en centimes par cycle, 1 ct
+par défaut). Le calcul classe les créneaux au dixième de centime, ce qui est
+plus fin que l'erreur d'une prévision solaire : sans tolérance, il fait
+attendre trois heures pour gagner un demi-centime. Avec elle, une fois le
+meilleur plan trouvé, chaque cycle est déplacé parmi les créneaux qui ne
+coûtent pas plus que le sien, tolérance comprise — **au plus tôt** si
+l'ajustement est « faible », **au plus fort de la production** s'il est
+« max ». Le détail du calcul dit alors quel était le créneau le moins cher
+et ce que coûte l'écart.
+
+Ce que la tolérance ne change pas : le chauffe-eau reste prioritaire, la
+pause entre deux cycles est tenue, et le conseil ne bascule pas — un cycle
+moins cher de jour que de nuit le reste, un cycle reporté à demain aussi.
+Elle ne joue que si les tarifs sont connus. À **0**, le créneau le moins
+cher gagne toujours.
+
 **Le switch « Optimisé »** — dans le bloc « Machines » du tableau de bord et
 dans l'onglet — décide de ce qu'on fait des heures creuses. Le basculer
 refait le plan aussitôt.

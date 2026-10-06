@@ -259,6 +259,7 @@ def onglet(request):
                 "plage_debut": api.plage_machines()[0],
                 "plage_fin": api.plage_machines()[1],
                 "pause_min": api.pause_machines_min(),
+                "tolerance_cts": f"{api.tolerance_machines_cts():.2f}",
             },
         },
     )

@@ -38,6 +38,14 @@ deux cycles — il n'y a qu'une machine. À coût égal, le réglage
 « ajustement » du module départage, comme pour le ballon : au plus tôt
 (« faible ») ou au plus fort de la production (« max »).
 
+**La tolérance** (réglage du profil, en centimes par cycle) élargit ce
+« coût égal ». Le meilleur plan est cherché comme ci-dessus, puis chaque
+cycle est déplacé parmi les créneaux qui ne coûtent pas plus que le sien,
+tolérance comprise : au plus tôt, ou au plus fort de la production. Attendre
+trois heures pour gagner un demi-centime sur une prévision n'a pas de sens.
+Elle ne change jamais la décision : un cycle moins cher de jour que de nuit
+(ou reporté à demain) le reste. À 0, rien n'est déplacé.
+
 **Le switch « Optimisé »** décide de ce qu'on fait des heures creuses :
 
 - sur « on », le coût de chaque cycle en journée est comparé à celui du même
@@ -219,9 +227,22 @@ def _evaluer(depart, profil, pointe_kw, surplus, ballon_kw, prix):
     }
 
 
+def _cote(cout, plafond):
+    """De quel côté d'un plafond tombe un coût : -1 dessous, 0 dessus, 1 au-delà.
+
+    Mêmes marges que les comparaisons avec les heures creuses (``_cycle``,
+    ``_reporter``) : c'est ce qui garantit qu'un cycle déplacé par la
+    tolérance garde le conseil qu'il avait.
+    """
+    if plafond is None or cout < plafond - 1e-9:
+        return -1
+    return 0 if cout <= plafond + 1e-9 else 1
+
+
 def planifier(*, maintenant, points, profils, demandes, pointe_kw, talon_kw,
               ballon=None, plage=("08:00", "20:00"), pause_min=30, tarifs=None,
-              ajustement="faible", deja=(), comparer_hc=True, lendemain=None):
+              ajustement="faible", deja=(), comparer_hc=True, lendemain=None,
+              tolerance=0.0, plafonds=None):
     """Place les cycles demandés sur la journée. Fonction pure.
 
     - ``maintenant`` : instant du calcul (datetime avec fuseau) ; aucun
@@ -244,7 +265,16 @@ def planifier(*, maintenant, points, profils, demandes, pointe_kw, talon_kw,
       moins. Faux, il reste à son créneau de jour ;
     - ``lendemain`` : ce qu'on sait de demain (voir ``_lendemain``), ou
       ``None``. Fourni, un cycle qui n'a plus de place aujourd'hui est
-      examiné pour demain au lieu d'aller d'office en heures creuses.
+      examiné pour demain au lieu d'aller d'office en heures creuses ;
+    - ``tolerance`` : surcoût admis par cycle, en euros, pour le déplacer
+      hors de son meilleur créneau (voir ``assouplir`` plus bas). Sans
+      tarifs, elle ne joue pas : il n'y a pas de coût à comparer ;
+    - ``plafonds`` : ``{type: €}``, coût que la tolérance ne fait pas
+      franchir à un cycle qui était en dessous. Par défaut, avec
+      ``comparer_hc``, le prix du cycle en heures creuses.
+
+    Un cycle déplacé par la tolérance porte ``meilleur_debut`` (le créneau
+    le moins cher, qu'il a quitté) et ``surcout`` (ce que ça coûte, en €).
 
     Retourne ``{"cycles": [...], "non_places": {type: n}}``. Les cycles sont
     triés par heure ; ceux qui n'ont pas trouvé de place aujourd'hui ferment
@@ -351,11 +381,70 @@ def planifier(*, maintenant, points, profils, demandes, pointe_kw, talon_kw,
         reste = reste[:choix] + (reste[choix] - 1,) + reste[choix + 1:]
         i = suivant(i, type_cycle)
 
+    # --- Tolérance ---
+    def assouplir(places):
+        """Déplace chaque cycle parmi les créneaux qui valent le sien.
+
+        Le plan trouvé est le moins cher au dixième de centime près. Pour
+        chaque cycle, dans l'ordre, on retient parmi les départs qui ne
+        coûtent pas plus que le sien + la tolérance celui que l'ajustement
+        préfère : le plus tôt (« faible ») ou le plus productif (« max »).
+
+        Ce qui ne bouge pas : un départ exclu par le chauffe-eau le reste,
+        la pause entre deux cycles est tenue (le cycle suivant n'a pas
+        encore bougé, on lui laisse sa place), et un cycle ne passe pas
+        au-dessus de son plafond s'il était en dessous.
+
+        Retourne des ``(départ, type, bilan, départ d'origine, bilan
+        d'origine)``.
+        """
+        souples = []
+        libre = departs[0]
+        for rang, (depart, type_cycle, bilan) in enumerate(places):
+            duree = profils[type_cycle]["duree_min"]
+            if rang + 1 < len(places):
+                limite = places[rang + 1][0] - pause_min - duree
+            else:
+                limite = departs[-1]
+            plafond = (plafonds or {}).get(type_cycle)
+            cout = bilan["cout_jour"]
+            retenu, cle_retenue = (depart, bilan), None
+            for d, b in zip(departs, bilans[type_cycle]):
+                if b is None or not libre <= d <= limite:
+                    continue
+                if b["cout_jour"] > cout + tolerance + 1e-9:
+                    continue
+                if _cote(b["cout_jour"], plafond) > _cote(cout, plafond):
+                    continue
+                if ajustement == "max":
+                    # À production égale, le cycle reste où il était.
+                    cle = (-round(b["marge_kwh"] * 1000), d != depart, d)
+                else:
+                    cle = (d,)
+                if cle_retenue is None or cle < cle_retenue:
+                    retenu, cle_retenue = (d, b), cle
+            souples.append((retenu[0], type_cycle, retenu[1], depart, bilan))
+            libre = retenu[0] + duree + pause_min
+        return souples
+
+    if tolerance > 0 and prix is not None and places:
+        if plafonds is None and comparer_hc:
+            plafonds = {t: profils[t]["kwh"] * tarifs["hc"] for t in types}
+        places = assouplir(places)
+    else:
+        places = [(d, t, b, d, b) for d, t, b in places]
+
     cycles = list(conserves)
-    for depart, type_cycle, bilan in places:
+    for depart, type_cycle, bilan, depart_origine, bilan_origine in places:
         profil = profils[type_cycle]
         debut = minuit + timedelta(minutes=depart)
-        cycles.append(_cycle(profil, tarifs, debut, bilan, comparer_hc))
+        cycle = _cycle(profil, tarifs, debut, bilan, comparer_hc)
+        if depart != depart_origine:
+            cycle["meilleur_debut"] = minuit + timedelta(minutes=depart_origine)
+            cycle["surcout"] = max(
+                0.0, bilan["cout_jour"] - bilan_origine["cout_jour"]
+            )
+        cycles.append(cycle)
     cycles.sort(key=lambda c: c["debut"])
 
     non_places = {t: n for t, n in zip(types, reste) if n}
@@ -363,7 +452,7 @@ def planifier(*, maintenant, points, profils, demandes, pointe_kw, talon_kw,
         cycles += _reporter(
             non_places, profils, tarifs, lendemain,
             pointe_kw=pointe_kw, talon_kw=talon_kw, plage=plage,
-            pause_min=pause_min, ajustement=ajustement,
+            pause_min=pause_min, ajustement=ajustement, tolerance=tolerance,
         )
     else:
         for type_cycle, nombre in non_places.items():
@@ -413,7 +502,11 @@ def _reporter(non_places, profils, tarifs, lendemain, **reglages):
     essai = planifier(
         maintenant=lendemain["minuit"], points=lendemain["points"],
         profils=profils, demandes=non_places, ballon=lendemain.get("ballon"),
-        tarifs=lendemain["tarifs"], comparer_hc=False, **reglages,
+        tarifs=lendemain["tarifs"], comparer_hc=False,
+        # La tolérance ne doit pas faire perdre son report à un cycle : il
+        # n'est reporté que s'il coûte moins que les heures creuses de ce soir.
+        plafonds={t: profils[t]["kwh"] * tarifs["hc"] for t in non_places},
+        **reglages,
     )
     de_nuit, reportes = [], []
     for cycle in essai["cycles"]:
@@ -470,6 +563,9 @@ def _cycle(profil, tarifs, debut, bilan, comparer_hc=True):
         "motif": None,
         "demain_debut": None,
         "cout_demain": None,
+        # Renseignés par ``planifier`` quand la tolérance a déplacé le cycle.
+        "meilleur_debut": None,
+        "surcout": None,
     }
 
     if bilan is None:
@@ -764,6 +860,7 @@ def calculer(tracer=False, tout_replanifier=False):
         deja=[] if tout_replanifier else _cycles_lances(maintenant),
         comparer_hc=comparer_hc,
         lendemain=lendemain,
+        tolerance=api.tolerance_machines_cts() / 100.0,
     )
 
     resultat = {
@@ -775,6 +872,7 @@ def calculer(tracer=False, tout_replanifier=False):
         "talon_kwh_h": api.conso_min_maison(),
         "plage": list(plage),
         "pause_min": api.pause_machines_min(),
+        "tolerance_cts": api.tolerance_machines_cts(),
         "ballon": ballon,
         "tarifs": tarifs,
         "ajustement": api.ajustement(),
@@ -999,6 +1097,18 @@ def _detail_lendemain(lendemain):
     )
 
 
+def _detail_tolerance(c):
+    """Fin de ligne d'un cycle que la tolérance a déplacé, sinon rien."""
+    meilleur = c.get("meilleur_debut")
+    if not meilleur or not c.get("debut"):
+        return ""
+    sens = "avancé" if c["debut"] < meilleur else "décalé"
+    return (
+        f" Le créneau le moins cher était {_hm(meilleur)} : {sens} pour "
+        f"{c.get('surcout') or 0.0:.3f} € de plus, dans la tolérance."
+    )
+
+
 def detail_texte(r):
     """Explication du plan, ligne par ligne : les données, puis chaque cycle."""
     lignes = []
@@ -1078,6 +1188,16 @@ def detail_texte(r):
             "les heures creuses."
         )
 
+    if tarifs and r.get("tolerance_cts"):
+        choix = (
+            "le plus productif" if r.get("ajustement") == "max" else "le plus tôt"
+        )
+        lignes.append(
+            f"Tolérance de {r['tolerance_cts']:.1f} ct par cycle : entre les "
+            f"créneaux qui valent le meilleur à ce prix près, c'est {choix} "
+            f"qui est retenu."
+        )
+
     lendemain = r.get("lendemain")
     if lendemain and any(
         str(c.get("motif") or "").startswith("demain") for c in r["cycles"]
@@ -1107,7 +1227,7 @@ def detail_texte(r):
                 ligne
                 + f" → {c['cout_demain']:.3f} € contre {c['cout_hc']:.3f} € en heures "
                 f"creuses ce soir. DÉCISION : lancer demain à {c['heure']} "
-                f"(écart {c['ecart']:.3f} €)."
+                f"(écart {c['ecart']:.3f} €)." + _detail_tolerance(c)
             )
             continue
         if not c.get("debut"):
@@ -1149,7 +1269,7 @@ def detail_texte(r):
                 f"(écart {c['ecart']:.3f} €)."
             )
         else:
-            ligne += f". DÉCISION : lancer à {c['heure']}."
+            ligne += f". DÉCISION : lancer à {c['heure']}." + _detail_tolerance(c)
         lignes.append(ligne)
 
     if r.get("erreur"):
