@@ -235,6 +235,7 @@ def onglet(request):
                 "conso_min_maison": f"{api.conso_min_maison():.2f}",
                 "conso_chauffe_eau": f"{api.conso_chauffe_eau():.2f}",
                 "heure_nuit": api.heure_nuit(),
+                "ecart_nuit_cts": f"{api.ecart_nuit_cts():.2f}",
                 "ajustement": api.ajustement(),
             },
             "choix_ajustement": api.CHOIX["ajustement"],

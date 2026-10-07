@@ -118,7 +118,8 @@
       {% if r.gain is not None %}
         <p class="small text-secondary mt-2 mb-0">Écart : <strong>{{ r.gain|floatformat:3 }} €</strong> en faveur de
           {% if r.cout_jour <= r.cout_nuit %}la journée solaire{% else %}la nuit{% endif %}.
-          {% if not r.optimiser %}<span class="text-warning">Optimisation désactivée : la décision ignore ces coûts.</span>{% endif %}</p>
+          {% if not r.optimiser %}<span class="text-warning">Optimisation désactivée : la décision ignore ces coûts.</span>{% endif %}
+          {% if r.jour_garde %}<span class="text-warning">Moins de {{ r.seuil_nuit_cts|floatformat:"-2" }} ct d'écart : la chauffe reste en journée.</span>{% endif %}</p>
       {% endif %}
     {% endif %}
 
@@ -368,6 +369,16 @@
                    {% if params.optimiser %}checked{% endif %}>
             <label class="form-check-label" for="optimiser"><strong>optimiser</strong></label>
             <div class="form-text">arbitrage coût jour/nuit</div>
+          </div>
+        </div>
+        <div class="col-12 col-md-4">
+          <label class="form-label">ecart_nuit_cts</label>
+          <input type="text" name="ecart_nuit_cts" class="form-control" value="{{ params.ecart_nuit_cts }}">
+          <div class="form-text">
+            centimes — avec <strong>optimiser</strong>, les heures creuses ne l'emportent
+            que si elles font gagner au moins cette somme. En dessous, la chauffe reste en
+            journée : une éclaircie de plus que prévu peut effacer l'écart.
+            0 = le moins cher gagne toujours.
           </div>
         </div>
         <div class="col-12 col-md-4">

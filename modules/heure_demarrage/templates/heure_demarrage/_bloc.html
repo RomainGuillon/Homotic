@@ -40,6 +40,9 @@
         <div class="d-flex justify-content-between small">
           <span>Nuit</span><strong {% if r.mode == "nuit" %}style="color:#4ade80"{% endif %}>{{ r.cout_nuit|floatformat:2 }} €</strong>
         </div>
+        {% if r.jour_garde %}
+          <div class="text-secondary small">moins de {{ r.seuil_nuit_cts|floatformat:"-2" }} ct d'écart : journée gardée</div>
+        {% endif %}
       {% else %}
         <div class="fw-bold">{% if r.optimiser %}Optimisé{% else %}Solaire max{% endif %}</div>
         <div class="text-secondary small">{% if not r.optimiser %}sans arbitrage de coût{% endif %}</div>

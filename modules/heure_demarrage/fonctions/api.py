@@ -25,6 +25,7 @@ REGLAGES = [
     ("conso_min_maison", "0.30", "float"),
     ("conso_chauffe_eau", "2.50", "float"),
     ("heure_nuit", "04:30", "heure"),
+    ("ecart_nuit_cts", "10.00", "float"),
 ]
 
 # Réglages des machines (lave-linge lancé à la main, voir machines.py).
@@ -138,6 +139,19 @@ def heure_nuit():
     return "04:30"
 
 
+def ecart_nuit_cts():
+    """Écart de coût à partir duquel les heures creuses l'emportent (centimes).
+
+    Ne joue que si « optimiser » est coché. Tant que la chauffe de nuit ne
+    fait pas gagner au moins cette somme, la chauffe reste sur le créneau
+    solaire : quelques centimes sont en dessous de l'erreur d'une prévision,
+    et une éclaircie de plus que prévu suffit à les effacer — alors qu'une
+    chauffe partie la nuit ne profite plus de rien. À 0, le moins cher des
+    deux gagne toujours, comme avant.
+    """
+    return max(0.0, _float("ecart_nuit_cts"))
+
+
 def saison():
     """« hiver » ou « ete », d'après les switchs exclusifs du tableau de bord.
 
@@ -170,6 +184,7 @@ def publier_variables():
     set_variable("ajustement", ajustement())
     set_variable("conso_min_maison", f"{conso_min_maison():.2f}")
     set_variable("conso_chauffe_eau", f"{conso_chauffe_eau():.2f}")
+    set_variable("ecart_nuit_cts", f"{ecart_nuit_cts():.2f}")
     set_variable("duree_chauffe_min", str(duree_chauffe_min()))
 
 

@@ -30,9 +30,11 @@ import égal.
     COÛT NUIT = besoin du ballon × prix du kWh en heures creuses
 
 Le solaire autoconsommé ne coûte rien : aucun manque à gagner de revente
-n'entre dans le calcul. Si « optimiser » est coché, le moins cher des deux
-gagne (égalité → journée solaire) ; sinon on garde simplement la fenêtre
-retenue ci-dessus.
+n'entre dans le calcul. Si « optimiser » est coché, la nuit ne l'emporte que
+si elle fait gagner au moins ``ecart_nuit_cts`` (10 centimes par défaut) :
+en dessous, la chauffe reste en journée, où une éclaircie de plus que prévu
+peut encore effacer l'écart. Sans « optimiser », on garde simplement la
+fenêtre retenue ci-dessus.
 
 Les données d'entrée — la prévision de production, la tarification,
 l'estimation de la chauffe — viennent de **besoins déclarés** (voir ``conf.py`` et
@@ -375,6 +377,17 @@ def detail_texte(r):
                     "Optimisation désactivée : la décision ignore ces coûts et "
                     "retient le créneau le plus productif."
                 )
+            elif r.get("jour_garde"):
+                lignes.append(
+                    f"Écart inférieur au seuil de {_cts(r.get('seuil_nuit_cts'))} "
+                    "(réglage ecart_nuit_cts) : la chauffe reste en journée, une "
+                    "éclaircie de plus que prévu suffit à l'effacer."
+                )
+            elif moins_cher == "NUIT" and r.get("seuil_nuit_cts"):
+                lignes.append(
+                    f"Écart d'au moins {_cts(r['seuil_nuit_cts'])} (réglage "
+                    "ecart_nuit_cts) : les heures creuses l'emportent."
+                )
         elif r.get("optimiser"):
             lignes.append(
                 "Comparaison impossible : "
@@ -398,6 +411,23 @@ def detail_texte(r):
             "DÉCISION : aucune heure retenue, la précédente est conservée."
         )
     return lignes
+
+
+def _cts(valeur):
+    """« 10 ct », « 2,5 ct » : un montant en centimes, à la française."""
+    return f"{float(valeur or 0):g} ct".replace(".", ",")
+
+
+def _nuit_gagne(cout_jour, cout_nuit, seuil_cts):
+    """Les heures creuses l'emportent-elles sur le créneau solaire ?
+
+    Il faut qu'elles soient moins chères, et d'au moins ``seuil_cts``
+    centimes : « moins de 10 centimes d'écart » garde la journée, 10 tout
+    rond bascule. À égalité de coût, la journée gagne toujours. La marge de
+    1e-9 n'est là que pour l'arrondi des flottants.
+    """
+    ecart = cout_jour - cout_nuit
+    return ecart > 0 and ecart >= max(0.0, seuil_cts) / 100 - 1e-9
 
 
 def _serialiser(valeur):
@@ -443,9 +473,10 @@ def _resultat_vide(erreur):
         ("heure", "mode", "creneau", "saison", "duree_min", "optimiser",
          "heure_nuit", "besoin_kwh", "talon_kwh_h", "cout_jour", "cout_nuit",
          "gain", "couleur", "prix_hp", "prix_hc", "part_solaire_kwh",
-         "part_reseau_kwh", "estimation")
+         "part_reseau_kwh", "estimation", "seuil_nuit_cts")
     )
     vide.update({
+        "jour_garde": False,
         "detail": [], "erreur": erreur, "quand": None,
         "perime": False, "jamais_calcule": True,
         "arbitrage": "nuit", "ajustement": "faible",
@@ -517,9 +548,10 @@ def calculer(tracer=False, arbitrage="nuit"):
 
     ``arbitrage`` :
 
-    - ``"nuit"`` (défaut) : comportement historique. On chiffre la chauffe
-      de nuit en heures creuses et, si « optimiser » est coché, la moins
-      chère des deux l'emporte.
+    - ``"nuit"`` (défaut) : on chiffre la chauffe de nuit en heures creuses
+      et, si « optimiser » est coché, elle l'emporte quand elle fait gagner
+      au moins ``ecart_nuit_cts`` — en dessous, la journée est gardée et
+      ``jour_garde`` le signale.
     - ``"jour"`` : les heures creuses ne sont plus accessibles — typiquement
       un recalcul lancé en matinée. Aucune comparaison avec la nuit, on
       retient le meilleur créneau solaire restant. Et si la journée n'offre
@@ -543,6 +575,10 @@ def calculer(tracer=False, arbitrage="nuit"):
         "gain": None,
         "couleur": None,
         "erreur": "",
+        # Écart en dessous duquel la nuit, même moins chère, ne gagne pas —
+        # et le drapeau qui dit que c'est ce qui s'est passé.
+        "seuil_nuit_cts": api.ecart_nuit_cts(),
+        "jour_garde": False,
     }
 
     # --- 1. Créneau solaire du jour (si prévisions disponibles) ---
@@ -616,12 +652,15 @@ def calculer(tracer=False, arbitrage="nuit"):
         resultat["heure"] = heure_solaire
         if not resultat["erreur"]:
             resultat["erreur"] = "tarifs indisponibles : arbitrage par le coût impossible"
-    elif resultat["cout_nuit"] < resultat["cout_jour"]:
+    elif _nuit_gagne(resultat["cout_jour"], resultat["cout_nuit"],
+                     resultat["seuil_nuit_cts"]):
         resultat["mode"] = "nuit"
         resultat["heure"] = api.heure_nuit()
     else:
         resultat["mode"] = "solaire"
         resultat["heure"] = heure_solaire
+        # La nuit coûtait un peu moins, mais pas assez pour quitter le soleil.
+        resultat["jour_garde"] = resultat["cout_nuit"] < resultat["cout_jour"]
 
     return _finaliser(resultat, tracer)
 

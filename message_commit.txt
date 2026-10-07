@@ -1,28 +1,24 @@
-Chauffe-eau : l'écart avant la chauffe est retiré de la température avant d'estimer
+Chauffe-eau : les heures creuses ne gagnent qu'à partir de 10 centimes d'écart
 
-L'estimation de la durée part de la température du ballon au moment du
-calcul, alors que le ballon part souvent plus froid quelques heures plus
-tard. Le suivi mesure cet écart depuis le commit précédent ; à partir de
-dix chauffes mesurées, l'estimation en tient compte.
+Avec « optimiser », la chauffe partait en heures creuses dès qu'elles
+coûtaient moins, même de quelques centimes. C'est en dessous de l'erreur
+d'une prévision solaire : une éclaircie de plus que prévu efface l'écart,
+alors qu'une chauffe partie la nuit ne profite plus de rien.
 
-- modele.estimation : dès que le bilan du départ a ses dix chauffes,
-  l'écart moyen est ajouté à la température lue, et la durée est estimée
-  sur cette température attendue au départ. Lu à 51,2 °C avec 2,5 °C
-  perdus en moyenne : estimé pour un départ à 48,7 °C ;
-- c'est la température attendue au départ qui doit tomber dans la plage
-  connue de la droite — sinon pas d'estimation, comme avant ;
-- la température publiée (clé temperature) et celle que le suivi garde
-  avec chaque chauffe restent la température lue, jamais la corrigée :
-  l'écart mesuré est celui du ballon, la correction ne se corrige pas
-  elle-même ;
-- l'objet estimation_chauffe gagne temperature_depart, ecart_depart
-  (None tant que l'écart n'est pas appliqué) et chauffes_ecart ;
-- réglage modele_corriger_depart (« oui » par défaut), dans le
-  paramétrage de l'onglet : « Mesuré seulement » coupe la correction
-  sans arrêter la mesure ;
-- l'onglet Chauffe-eau, l'onglet Heure de démarrage et le détail du
-  calcul disent « attendu à … °C au départ » quand la correction joue.
+- nouveau réglage ecart_nuit_cts (carte « Variables du module »), en
+  centimes, 10 par défaut ; 0 = comportement d'avant ;
+- calcul.calculer : la nuit ne l'emporte que si elle fait gagner au moins
+  ce seuil (« moins de 10 centimes » garde la journée, 10 tout rond
+  bascule) ; à coût égal, la journée gagne toujours ;
+- le résultat porte seuil_nuit_cts et jour_garde ; l'onglet, le bloc du
+  tableau de bord et le détail du calcul (Journal) disent quand c'est le
+  seuil qui a gardé la journée ;
+- ce qui ne bouge pas : sans « optimiser », le créneau solaire est retenu
+  tel quel ; une journée sans aucun surplus prévu n'a pas de créneau, donc
+  rien à comparer, et reste en heures creuses ; l'arbitrage « jour » et
+  les machines ne sont pas concernés ;
+- le réglage est publié comme variable globale, comme les autres.
 
-Tant qu'il y a moins de dix chauffes mesurées, rien ne change.
+14 tests ajoutés ; les 293 tests du projet passent.
 
-Documentation (FR, EN, DE) mise à jour.
+Documentation (FR) mise à jour.

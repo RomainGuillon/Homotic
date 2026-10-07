@@ -15,6 +15,8 @@ Deux choses sont vérifiées ici :
   cycle qui n'a plus de place, et ne repropose pas une machine déjà lancée ;
 - le calcul du chauffe-eau, qui pilote une chauffe réelle : l'arrivée des
   machines dans le module ne doit rien changer à ce qu'il décide ;
+- l'arbitrage jour/nuit du chauffe-eau : les heures creuses ne l'emportent
+  que si elles font gagner au moins ``ecart_nuit_cts`` ;
 - la durée et l'énergie de la chauffe : celles qu'estime le fournisseur
   branché sur ``estimation_chauffe`` quand il répond, et dans tous les
   autres cas les réglages du module, comme avant.
@@ -1058,6 +1060,113 @@ class ChauffeEauInchange(TestCase):
         )
 
 
+class EcartMinimalPourLaNuit(TestCase):
+    """« optimiser » coché : quelques centimes ne suffisent pas à quitter le soleil.
+
+    Ballon de 2,4 kWh, chauffe d'une heure, talon de 0,3 kWh : avec une
+    production de ``kw`` kW, il reste ``2,7 − kw`` kWh à acheter en journée.
+    """
+
+    BLEU = (0.1609, 0.1296, "BLUE")
+    ROUGE = (0.7562, 0.1568, "RED")
+
+    def setUp(self):
+        set_setting("optimiser", "oui", module=api.MODULE)
+        set_setting("temp_chauffe_ete", "60", module=api.MODULE)
+        set_setting("conso_chauffe_eau", "2.40", module=api.MODULE)
+        set_setting("conso_min_maison", "0.30", module=api.MODULE)
+
+    def _calculer(self, kw, tarifs=BLEU):
+        points = [(t, kw) for t, _kw in ChauffeEauInchange.POINTS]
+        with mock.patch.object(calcul, "_forecast_points", return_value=(points, "")), \
+                mock.patch.object(calcul, "_tarifs", return_value=tarifs):
+            return calcul.calculer()
+
+    def test_dix_centimes_par_defaut_et_jamais_negatif(self):
+        self.assertEqual(api.ecart_nuit_cts(), 10.0)
+        set_setting("ecart_nuit_cts", "-3", module=api.MODULE)
+        self.assertEqual(api.ecart_nuit_cts(), 0.0)
+
+    def test_moins_de_dix_centimes_la_journee_est_gardee(self):
+        # 0,5 kW : 2,2 kWh achetés en HP, 0,354 € — contre 0,311 € la nuit.
+        # La nuit ne fait gagner que 4 centimes : on reste au soleil.
+        r = self._calculer(0.5)
+        self.assertLess(r["cout_nuit"], r["cout_jour"])
+        self.assertAlmostEqual(r["gain"], 0.0429, places=3)
+        self.assertEqual(r["mode"], "solaire")
+        self.assertEqual(r["heure"], "10:00")
+        self.assertTrue(r["jour_garde"])
+        self.assertIn("Écart inférieur au seuil de 10 ct", " ".join(r["detail"]))
+        self.assertIn("chauffe sur le créneau solaire", r["detail"][-1])
+
+    def test_un_gros_ecart_envoie_toujours_en_heures_creuses(self):
+        # Même production, jour rouge : 1,66 € contre 0,38 €.
+        r = self._calculer(0.5, self.ROUGE)
+        self.assertEqual((r["mode"], r["heure"]), ("nuit", api.heure_nuit()))
+        self.assertFalse(r["jour_garde"])
+        self.assertIn("les heures creuses l'emportent", " ".join(r["detail"]))
+
+    def test_le_seuil_vaut_aussi_un_jour_rouge(self):
+        # 2,1 kW : 0,6 kWh à acheter, 0,454 € contre 0,376 € — 8 centimes.
+        r = self._calculer(2.1, self.ROUGE)
+        self.assertEqual(r["mode"], "solaire")
+        self.assertTrue(r["jour_garde"])
+
+    def test_dix_centimes_tout_rond_basculent(self):
+        # 1 kW : 1,7 kWh × 0,20 € = 0,34 €, contre 2,4 × 0,10 € = 0,24 €.
+        r = self._calculer(1.0, (0.20, 0.10, "BLUE"))
+        self.assertAlmostEqual(r["gain"], 0.10)
+        self.assertEqual(r["mode"], "nuit")
+
+    def test_a_zero_le_moins_cher_gagne_comme_avant(self):
+        set_setting("ecart_nuit_cts", "0", module=api.MODULE)
+        r = self._calculer(0.5)
+        self.assertEqual(r["mode"], "nuit")
+        self.assertFalse(r["jour_garde"])
+        self.assertNotIn("ecart_nuit_cts", " ".join(r["detail"]))
+
+    def test_le_seuil_se_regle(self):
+        set_setting("ecart_nuit_cts", "3", module=api.MODULE)
+        self.assertEqual(self._calculer(0.5)["mode"], "nuit")      # 4 ct d'écart
+        set_setting("ecart_nuit_cts", "5", module=api.MODULE)
+        self.assertEqual(self._calculer(0.5)["mode"], "solaire")
+
+    def test_la_journee_moins_chere_n_est_pas_dite_gardee(self):
+        r = self._calculer(4.0)
+        self.assertEqual((r["mode"], r["cout_jour"]), ("solaire", 0.0))
+        self.assertFalse(r["jour_garde"])
+        self.assertNotIn("ecart_nuit_cts", " ".join(r["detail"]))
+
+    def test_sans_aucun_surplus_les_heures_creuses_restent(self):
+        # Production sous le talon toute la journée : aucun créneau, donc
+        # aucun écart à comparer — le seuil ne ramène pas la chauffe de jour.
+        r = self._calculer(0.2)
+        self.assertIsNone(r["creneau"])
+        self.assertEqual(r["mode"], "nuit")
+        self.assertFalse(r["jour_garde"])
+
+    def test_sans_optimiser_le_seuil_ne_joue_pas(self):
+        set_setting("optimiser", "non", module=api.MODULE)
+        r = self._calculer(0.5, self.ROUGE)
+        self.assertEqual(r["mode"], "solaire")
+        self.assertFalse(r["jour_garde"])
+
+    def test_le_seuil_est_memorise_avec_le_calcul(self):
+        self._calculer(0.5)
+        relu = calcul.dernier_resultat()
+        self.assertEqual(relu["seuil_nuit_cts"], 10.0)
+        self.assertTrue(relu["jour_garde"])
+
+    def test_un_calcul_d_avant_le_seuil_se_relit(self):
+        r = self._calculer(0.5)
+        ancien = {k: v for k, v in r.items()
+                  if k not in ("seuil_nuit_cts", "jour_garde", "quand")}
+        calcul.memoriser(ancien)
+        relu = calcul.dernier_resultat()
+        self.assertFalse(relu.get("jour_garde"))
+        self.assertTrue(calcul.detail_texte(relu))
+
+
 class PrevisionPubliee(TestCase):
     """Le créneau publié porte la prévision du cycle : durée et énergie.
 
@@ -1571,3 +1680,31 @@ class PagesDuModule(TestCase):
         self.assertEqual(api.ajustement(), "max")
         self.assertTrue(api.optimiser())
         self.assertEqual(get_variable("conso_chauffe_eau"), "2.40")
+        # Champ absent du formulaire posté : le seuil garde sa valeur.
+        self.assertEqual(api.ecart_nuit_cts(), 10.0)
+
+    def test_le_seuil_des_heures_creuses_se_regle_dans_l_onglet(self):
+        self.assertContains(self.client.get(self.URL), 'name="ecart_nuit_cts"')
+        self.client.post(self.URL, {
+            "action": "params", "temp_chauffe_ete": "60", "temp_chauffe_hiver": "90",
+            "conso_min_maison": "0,30", "conso_chauffe_eau": "2,40",
+            "heure_nuit": "04:30", "ajustement": "faible", "optimiser": "on",
+            "ecart_nuit_cts": "7,5",
+        })
+        self.assertEqual(api.ecart_nuit_cts(), 7.5)
+        self.assertEqual(get_variable("ecart_nuit_cts"), "7.50")
+        self.assertContains(self.client.get(self.URL), 'value="7.50"')
+
+    def test_l_onglet_et_le_bloc_disent_que_la_journee_est_gardee(self):
+        set_setting("optimiser", "oui", module=api.MODULE)
+        set_setting("conso_chauffe_eau", "2.40", module=api.MODULE)
+        points = [(t, 0.5) for t, _kw in ChauffeEauInchange.POINTS]
+        with mock.patch.object(calcul, "_forecast_points", return_value=(points, "")), \
+                mock.patch.object(calcul, "_tarifs", return_value=(0.1609, 0.1296, "BLUE")):
+            calcul.calculer()
+        self.assertContains(
+            self.client.get(self.URL), "Moins de 10 ct d'écart : la chauffe reste en journée"
+        )
+        self.assertContains(
+            self.client.get("/"), "moins de 10 ct d'écart : journée gardée"
+        )

@@ -216,6 +216,22 @@ pour l'énergie. C'est le repli quand le besoin n'est pas branché, et aussi
 quand le fournisseur préfère se taire (trop peu de chauffes mesurées, ballon
 plus froid que tout ce qu'il a vu) — l'écran en donne alors la raison.
 
+**Jour ou nuit.** Sans « optimiser », la chauffe va sur le créneau solaire
+retenu. Avec « optimiser », son coût (ce qu'il reste à acheter au réseau, en
+heures pleines) est comparé à celui d'une chauffe entière en heures creuses.
+Les heures creuses ne l'emportent que si elles font gagner au moins
+`ecart_nuit_cts` — **10 centimes** par défaut, réglable dans l'onglet. En
+dessous, la chauffe reste en journée : quelques centimes sont en deçà de
+l'erreur d'une prévision solaire, une éclaircie de plus que prévu suffit à
+les effacer, alors qu'une chauffe partie la nuit ne profite plus de rien.
+L'onglet, le bloc du tableau de bord et le Journal le disent quand c'est ce
+seuil qui a gardé la journée. À 0, le moins cher des deux gagne toujours.
+
+Le seuil ne ramène pas en journée une chauffe **sans aucun surplus prévu** :
+si la production reste sous le talon de la maison toute la journée, il n'y a
+pas de créneau solaire, donc rien à comparer, et la chauffe part en heures
+creuses.
+
 Saison : le switch **Hiver** décide. S'il est éteint — que « Été » soit
 allumé ou que les deux soient éteints — c'est **été**, donc la durée de
 chauffe courte. Aucun basculement automatique par la date.
