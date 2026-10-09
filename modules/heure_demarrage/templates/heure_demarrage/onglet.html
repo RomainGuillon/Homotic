@@ -163,13 +163,12 @@
                name="machines_court" min="0" max="{{ max_machines }}" value="{{ demandes.court }}">
       </div>
       <button class="btn btn-primary">Calculer</button>
-      <button class="btn btn-outline-secondary" name="tout" value="1">Tout replanifier</button>
     </form>
     {% include "heure_demarrage/_switch_optimise.html" with suffixe="Onglet" %}
     </div>
-    <p class="form-text mt-0 mb-3">Une machine dont l'heure est passée est supposée lancée :
-      elle disparaît du plan, et un nouveau calcul ne replace que les autres.
-      « Tout replanifier » repart de zéro.</p>
+    <p class="form-text mt-0 mb-3">Une machine dont l'heure est passée disparaît du plan.
+      « Calculer » place les machines demandées à partir de maintenant ; le plan
+      ne se recalcule jamais tout seul.</p>
 
     {% if p.jamais_calcule %}
       <p class="small text-warning mb-0">Aucun plan calculé.</p>
@@ -241,7 +240,7 @@
           — <strong>{{ p.total.cout_c|floatformat:1 }} cts</strong>{% endif %}.
         {% endif %}
         {% if p.nb_passees %}
-          Machines dont l'heure est passée, supposées lancées et masquées : {{ p.nb_passees }}.
+          Machines dont l'heure est passée, masquées : {{ p.nb_passees }}.
         {% endif %}
         {% if p.quand %}Calculé à {{ p.quand|date:"H:i" }}.{% endif %}</p>
 

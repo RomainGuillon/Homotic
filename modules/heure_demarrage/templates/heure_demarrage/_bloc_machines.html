@@ -18,12 +18,6 @@
            min="0" max="{{ max_machines }}" value="{{ demandes.court }}">
   </div>
   <button class="btn btn-sm btn-primary">Calculer</button>
-  {% if p.a_des_passees %}
-    {# Les machines dont l'heure est passée sont supposées lancées et masquées. #}
-    <button class="btn btn-sm btn-outline-secondary" name="tout" value="1"
-            title="Replacer toutes les machines, y compris celles dont l'heure est passée">
-      Tout replanifier</button>
-  {% endif %}
 </form>
 {% include "heure_demarrage/_switch_optimise.html" with retour="dashboard" suffixe="Bloc" %}
 </div>

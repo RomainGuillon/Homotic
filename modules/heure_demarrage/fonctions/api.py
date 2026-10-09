@@ -12,7 +12,7 @@ module ET publiés comme variables globales, pour être utilisables dans les
 scénarios (conditions et actions).
 """
 
-from core.services import get_setting, get_variable, journal, set_setting, set_variable
+from core.services import get_setting, get_variable, set_setting, set_variable
 
 MODULE = "heure_demarrage"
 
@@ -328,16 +328,6 @@ def tache_actualiser(arbitrage="nuit"):
     if resultat.get("heure"):
         set_variable("heure_demarrage_chauffe_eau", resultat["heure"])
     set_variable("heure_demarrage_mode", resultat.get("mode") or "")
-
-    # Les machines se placent autour du créneau du ballon, qui vient
-    # peut-être de bouger : leur plan est refait dans la foulée. Ce qui
-    # précède est déjà enregistré — une panne ici ne doit jamais coûter
-    # l'heure du chauffe-eau, d'où le filet.
-    try:
-        from . import machines
-
-        machines.recalculer_si_demande()
-    except Exception as exc:
-        journal(f"Machines : replanification impossible — {exc}",
-                module=MODULE, level="ERROR")
+    # Le plan des machines n'est pas refait ici : il ne change que quand
+    # on le demande (bouton « Calculer »), jamais tout seul.
     return resultat

@@ -70,10 +70,14 @@ jour rouge : heures creuses ce soir là aussi — sauf s'il ne reste plus aucun
 jour rouge à tirer cette saison, auquel cas demain est forcément bleu ou
 blanc et il est chiffré au plus cher des deux.
 
-Comme pour le ballon, **rien n'est recalculé à l'affichage** : le plan est
-mémorisé (réglage ``machines_dernier_calcul``) et ne change que sur demande.
-Un nouveau calcul dans la journée garde les cycles dont l'heure est passée
-— ils sont supposés lancés — et ne replace que ceux qui restent à faire.
+**Le plan ne change que sur demande.** Il est mémorisé (réglage
+``machines_dernier_calcul``) et rien ne le recalcule tout seul — ni
+l'affichage, ni le recalcul du chauffe-eau. Un cycle dont l'heure est
+passée n'est plus affiché, mais il n'est pas pour autant tenu pour lancé :
+la machine est lancée à la main, l'heure ne prouve rien. « Calculer » place
+donc les cycles demandés à partir de maintenant, sans rien décompter.
+Changer un réglage (switch « Optimisé », profil) replace seulement les
+cycles encore affichés (voir ``replanifier_restantes``).
 """
 
 import json
@@ -241,7 +245,7 @@ def _cote(cout, plafond):
 
 def planifier(*, maintenant, points, profils, demandes, pointe_kw, talon_kw,
               ballon=None, plage=("08:00", "20:00"), pause_min=30, tarifs=None,
-              ajustement="faible", deja=(), comparer_hc=True, lendemain=None,
+              ajustement="faible", comparer_hc=True, lendemain=None,
               tolerance=0.0, plafonds=None):
     """Place les cycles demandés sur la journée. Fonction pure.
 
@@ -257,9 +261,6 @@ def planifier(*, maintenant, points, profils, demandes, pointe_kw, talon_kw,
     - ``plage`` : heures entre lesquelles un lancement est possible ;
     - ``tarifs`` : ``{"hp", "hc", "hc_debut", "hc_fin"}`` (prix en €/kWh,
       bornes en heures), ou ``None`` — on classe alors sur l'énergie achetée ;
-    - ``deja`` : cycles d'un plan précédent déjà lancés. Ils sont conservés
-      tels quels, comptent dans la demande, et la machine n'est libre
-      qu'après eux ;
     - ``comparer_hc`` : vrai (switch « Optimisé » sur on, ou jour rouge), un
       cycle placé de jour est conseillé en heures creuses s'il y coûte
       moins. Faux, il reste à son créneau de jour ;
@@ -292,18 +293,10 @@ def planifier(*, maintenant, points, profils, demandes, pointe_kw, talon_kw,
             for m in range(_JOUR_MIN)
         ]
 
-    # --- Ce qui est déjà lancé, et ce qui reste à placer ---
-    conserves = []
     restant = {t: max(0, int(n)) for t, n in demandes.items()}
-    for cycle in sorted(deja, key=lambda c: c["debut"]):
-        if restant.get(cycle["type"], 0) > 0:
-            restant[cycle["type"]] -= 1
-            conserves.append({**cycle, "lancee": True})
 
     # --- Départs possibles ---
     premier = max(_minutes_hhmm(plage[0]), _minute(maintenant, minuit))
-    for cycle in conserves:
-        premier = max(premier, _minute(cycle["fin"], minuit) + pause_min)
     premier = -(-premier // PAS_DEPART_MIN) * PAS_DEPART_MIN  # arrondi au pas supérieur
     departs = list(range(premier, _minutes_hhmm(plage[1]) + 1, PAS_DEPART_MIN))
 
@@ -434,7 +427,7 @@ def planifier(*, maintenant, points, profils, demandes, pointe_kw, talon_kw,
     else:
         places = [(d, t, b, d, b) for d, t, b in places]
 
-    cycles = list(conserves)
+    cycles = []
     for depart, type_cycle, bilan, depart_origine, bilan_origine in places:
         profil = profils[type_cycle]
         debut = minuit + timedelta(minutes=depart)
@@ -558,7 +551,6 @@ def _cycle(profil, tarifs, debut, bilan, comparer_hc=True):
         "cout_hc": cout_hc,
         "ecart": None,
         "avec_ballon": False,
-        "lancee": False,
         # Renseignés par ``_reporter`` pour un cycle sans place aujourd'hui.
         "motif": None,
         "demain_debut": None,
@@ -801,35 +793,24 @@ def _creneau_ballon(maintenant):
     }
 
 
-def _cycles_lances(maintenant):
-    """Cycles du plan du jour dont l'heure de lancement est passée.
-
-    On suppose que le plan a été suivi : c'est ce qui permet de recalculer
-    en cours de journée sans reproposer une machine déjà faite. Un cycle
-    conseillé en heures creuses n'est pas « lancé » tant que la nuit n'est
-    pas là. Le bouton « Tout replanifier » ignore cette mémoire.
-    """
-    precedent = dernier_resultat()
-    if precedent["jamais_calcule"] or precedent["perime"]:
-        return []
-    return [
-        c for c in precedent["cycles"]
-        if c.get("debut") and c.get("conseil") == "jour" and c["debut"] < maintenant
-    ]
-
-
 # ----------------------------------------------------------------------
 # Calcul, mémoire et lecture
 # ----------------------------------------------------------------------
 
-def calculer(tracer=False, tout_replanifier=False):
+def calculer(tracer=False, demandes=None):
     """Calcule le plan des machines, le mémorise et le retourne.
 
-    ``tracer`` : écrit le détail dans le Journal. ``tout_replanifier`` :
-    repart de zéro, sans supposer lancés les cycles dont l'heure est passée.
+    Les cycles sont placés à partir de maintenant, sans rien décompter : un
+    cycle d'un plan précédent dont l'heure est passée n'est pas supposé
+    lancé.
+
+    ``tracer`` : écrit le détail dans le Journal. ``demandes`` : nombre de
+    cycles à placer par type ; par défaut, ceux saisis
+    (``api.machines_demandees``).
     """
     maintenant = _maintenant()
-    demandes = api.machines_demandees()
+    if demandes is None:
+        demandes = api.machines_demandees()
     profils = {t: api.profil_machine(t) for t, _libelle in api.TYPES_MACHINE}
     plage = api.plage_machines()
     ballon = _creneau_ballon(maintenant)
@@ -857,7 +838,6 @@ def calculer(tracer=False, tout_replanifier=False):
         pause_min=api.pause_machines_min(),
         tarifs=tarifs,
         ajustement=api.ajustement(),
-        deja=[] if tout_replanifier else _cycles_lances(maintenant),
         comparer_hc=comparer_hc,
         lendemain=lendemain,
         tolerance=api.tolerance_machines_cts() / 100.0,
@@ -901,15 +881,28 @@ def calculer(tracer=False, tout_replanifier=False):
     return dernier_resultat()
 
 
-def recalculer_si_demande():
-    """Refait le plan si des cycles sont demandés, sinon ne touche à rien.
+def replanifier_restantes():
+    """Replace les cycles du plan du jour encore à lancer, sans en ajouter.
 
-    Appelé après chaque recalcul du chauffe-eau : son créneau vient
-    peut-être de bouger, et les machines se placent autour de lui.
+    Pour un réglage qui change le calcul (switch « Optimisé », profil des
+    machines) : le plan affiché a été fait avec l'ancien. Seuls les cycles
+    encore affichés sont replacés — ceux dont l'heure est passée ne
+    reviennent pas. Rien à lancer (ou plan d'un autre jour) : le plan n'est
+    pas touché et ``None`` est retourné.
+
+    Jamais appelé sans action de l'utilisateur : le recalcul du chauffe-eau
+    ne touche pas aux machines.
     """
-    if sum(api.machines_demandees().values()) == 0:
+    plan = dernier_resultat()
+    if plan["jamais_calcule"] or plan["perime"]:
         return None
-    return calculer(tracer=True)
+    restantes = {t: 0 for t, _libelle in api.TYPES_MACHINE}
+    for cycle in plan["affichees"]:
+        if cycle.get("type") in restantes:
+            restantes[cycle["type"]] += 1
+    if not any(restantes.values()):
+        return None
+    return calculer(tracer=True, demandes=restantes)
 
 
 def _resultat_vide():
@@ -1003,9 +996,9 @@ def _completer(resultat):
         # Pourquoi ce cycle n'est pas reporté à demain (vide le plus souvent).
         cycle["raison"] = _MOTIFS.get(cycle.get("motif") or "", "")
 
-        # Une machine dont l'heure est passée est supposée lancée : elle
-        # reste dans le plan (le calcul en a besoin) mais n'est plus
-        # montrée, et ne compte plus dans les totaux.
+        # Une machine dont l'heure est passée n'est plus montrée et ne
+        # compte plus dans les totaux. Elle reste dans le plan mémorisé,
+        # mais aucun calcul ne la tient pour lancée.
         if cycle["passe"]:
             continue
         affichees.append(cycle)
@@ -1033,7 +1026,6 @@ def _completer(resultat):
     resultat["restantes"] = len(a_venir)
     resultat["reportees"] = len(reportees)
     resultat["nb_passees"] = len(resultat["cycles"]) - len(affichees)
-    resultat["a_des_passees"] = resultat["nb_passees"] > 0
     # Les cycles de jour d'abord, dans l'ordre ; ceux de la nuit ensuite.
     a_venir.sort(key=lambda c: (c.get("conseil") != "jour", c.get("debut") or maintenant))
     resultat["prochaine"] = (
@@ -1206,11 +1198,6 @@ def detail_texte(r):
 
     for numero, c in enumerate(r["cycles"], start=1):
         nom = f"{c['libelle']} n° {numero}"
-        if c.get("lancee"):
-            lignes.append(
-                f"{nom} : lancé à {_hm(c['debut'])} d'après le plan précédent, conservé."
-            )
-            continue
         if c.get("conseil") == "demain":
             ligne = (
                 f"{nom} : plus de créneau libre aujourd'hui → demain "

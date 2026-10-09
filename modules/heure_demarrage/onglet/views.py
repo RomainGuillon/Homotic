@@ -105,8 +105,9 @@ def _save_machines_params(request):
         )
     else:
         messages.success(request, "Profil des machines enregistré.")
-    # Le plan affiché a été calculé avec l'ancien profil.
-    machines.recalculer_si_demande()
+    # Le plan affiché a été calculé avec l'ancien profil : les cycles encore
+    # à lancer sont replacés.
+    machines.replanifier_restantes()
 
 
 def _planifier_machines(request):
@@ -115,9 +116,7 @@ def _planifier_machines(request):
         normal=request.POST.get("machines_normal"),
         court=request.POST.get("machines_court"),
     )
-    plan = machines.calculer(
-        tracer=True, tout_replanifier=bool(request.POST.get("tout"))
-    )
+    plan = machines.calculer(tracer=True)
     if not plan["cycles"]:
         messages.info(request, "Aucune machine demandée : le plan est vide.")
     elif plan["prochaine"]:
@@ -152,7 +151,7 @@ def _basculer_optimise(request):
         f"Machines : switch « Optimisé » sur {'on' if actif else 'off'}",
         module=api.MODULE,
     )
-    plan = machines.recalculer_si_demande()
+    plan = machines.replanifier_restantes()
     effet = (
         "chaque créneau est comparé aux heures creuses" if actif
         else "les machines sont placées dans la plage de lancement, sans "

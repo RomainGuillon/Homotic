@@ -40,13 +40,17 @@ def publier_variables():
 def recalculer_machines(normales="", courtes=""):
     """Refait le plan des machines et retourne l'heure de la prochaine.
 
-    ``normales`` / ``courtes`` : nombre de cycles voulus dans la journée.
-    Laissés vides, les nombres en place sont conservés — l'action sert alors
-    à rafraîchir le plan, par exemple après une mise à jour des prévisions.
+    ``normales`` / ``courtes`` : nombre de cycles voulus, placés à partir de
+    maintenant — comme le bouton « Calculer ». Laissés vides tous les deux,
+    l'action replace seulement les cycles encore à lancer du plan en place
+    (par exemple après une mise à jour des prévisions), sans en ajouter.
     Le créneau du chauffe-eau n'est jamais modifié par cette action.
     """
-    api.set_machines_demandees(normal=normales, court=courtes)
-    plan = machines.calculer(tracer=True)
+    if str(normales or "").strip() or str(courtes or "").strip():
+        api.set_machines_demandees(normal=normales, court=courtes)
+        plan = machines.calculer(tracer=True)
+    else:
+        plan = machines.replanifier_restantes() or machines.dernier_resultat()
     return plan["prochaine"]["heure"] if plan["prochaine"] else None
 
 
