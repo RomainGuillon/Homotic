@@ -73,9 +73,9 @@ blanc et il est chiffré au plus cher des deux.
 **Le plan ne change que sur demande.** Il est mémorisé (réglage
 ``machines_dernier_calcul``) et rien ne le recalcule tout seul — ni
 l'affichage, ni le recalcul du chauffe-eau. Un cycle dont l'heure est
-passée n'est plus affiché, mais il n'est pas pour autant tenu pour lancé :
-la machine est lancée à la main, l'heure ne prouve rien. « Calculer » place
-donc les cycles demandés à partir de maintenant, sans rien décompter.
+passée sort du plan : il n'est plus pris en compte pour quoi que ce soit.
+« Calculer » place les cycles demandés à partir de maintenant, sans rien
+décompter, puis remet les nombres saisis à zéro.
 Changer un réglage (switch « Optimisé », profil) replace seulement les
 cycles encore affichés (voir ``replanifier_restantes``).
 """
@@ -806,11 +806,15 @@ def calculer(tracer=False, demandes=None):
 
     ``tracer`` : écrit le détail dans le Journal. ``demandes`` : nombre de
     cycles à placer par type ; par défaut, ceux saisis
-    (``api.machines_demandees``).
+    (``api.machines_demandees``), qui sont alors remis à zéro.
     """
     maintenant = _maintenant()
-    if demandes is None:
+    saisie = demandes is None
+    if saisie:
         demandes = api.machines_demandees()
+        # La demande est prise en compte : les nombres saisis repartent à
+        # zéro, une prochaine demande sera un nouveau calcul.
+        api.set_machines_demandees(normal=0, court=0)
     profils = {t: api.profil_machine(t) for t, _libelle in api.TYPES_MACHINE}
     plage = api.plage_machines()
     ballon = _creneau_ballon(maintenant)
@@ -963,6 +967,18 @@ def _completer(resultat):
         f"{int(tarifs['hc_debut']) % 24:02d}:00" if tarifs else None
     )
 
+    # Une machine dont l'heure est passée sort du plan : elle n'est plus
+    # prise en compte pour quoi que ce soit — affichage, totaux, nouveau
+    # calcul. Strictement passée : prévue pour maintenant, elle reste à
+    # lancer. Seul un cycle de jour passe : celui de ce soir ou de demain
+    # reste à lancer tant que le plan vaut.
+    resultat["cycles"] = [
+        c for c in resultat["cycles"]
+        if not (
+            c.get("conseil") == "jour" and c.get("debut") and c["debut"] < maintenant
+        )
+    ]
+
     a_venir = []
     reportees = []
     affichees = []
@@ -971,12 +987,6 @@ def _completer(resultat):
     for numero, cycle in enumerate(resultat["cycles"], start=1):
         cycle["numero"] = numero
         conseil = cycle.get("conseil")
-        # Strictement passé : un cycle prévu pour maintenant reste à lancer.
-        # Seul un cycle de jour « passe » : celui de ce soir ou de demain
-        # reste à lancer tant que le plan vaut.
-        cycle["passe"] = bool(
-            conseil == "jour" and cycle.get("debut") and cycle["debut"] < maintenant
-        )
 
         # Coût de l'option conseillée : de jour (aujourd'hui ou demain), la
         # part solaire est gratuite ; de nuit, tout le cycle est acheté en
@@ -996,11 +1006,6 @@ def _completer(resultat):
         # Pourquoi ce cycle n'est pas reporté à demain (vide le plus souvent).
         cycle["raison"] = _MOTIFS.get(cycle.get("motif") or "", "")
 
-        # Une machine dont l'heure est passée n'est plus montrée et ne
-        # compte plus dans les totaux. Elle reste dans le plan mémorisé,
-        # mais aucun calcul ne la tient pour lancée.
-        if cycle["passe"]:
-            continue
         affichees.append(cycle)
         if cycle.get("heure"):
             (reportees if conseil == "demain" else a_venir).append(cycle)
@@ -1025,7 +1030,6 @@ def _completer(resultat):
     # partie — son heure, lue aujourd'hui, déclencherait un rappel à tort.
     resultat["restantes"] = len(a_venir)
     resultat["reportees"] = len(reportees)
-    resultat["nb_passees"] = len(resultat["cycles"]) - len(affichees)
     # Les cycles de jour d'abord, dans l'ordre ; ceux de la nuit ensuite.
     a_venir.sort(key=lambda c: (c.get("conseil") != "jour", c.get("debut") or maintenant))
     resultat["prochaine"] = (

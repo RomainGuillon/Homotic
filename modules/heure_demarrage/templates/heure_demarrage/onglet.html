@@ -166,9 +166,9 @@
     </form>
     {% include "heure_demarrage/_switch_optimise.html" with suffixe="Onglet" %}
     </div>
-    <p class="form-text mt-0 mb-3">Une machine dont l'heure est passée disparaît du plan.
-      « Calculer » place les machines demandées à partir de maintenant ; le plan
-      ne se recalcule jamais tout seul.</p>
+    <p class="form-text mt-0 mb-3">Une machine dont l'heure est passée sort du plan.
+      « Calculer » place les machines demandées à partir de maintenant, puis remet
+      les nombres à zéro ; le plan ne se recalcule jamais tout seul.</p>
 
     {% if p.jamais_calcule %}
       <p class="small text-warning mb-0">Aucun plan calculé.</p>
@@ -238,9 +238,6 @@
           <span class="text-success">{{ p.total.solaire_kwh|floatformat:2 }} kWh solaires</span>
           et {{ p.total.import_kwh|floatformat:2 }} kWh achetés{% if p.total.cout_c is not None %}
           — <strong>{{ p.total.cout_c|floatformat:1 }} cts</strong>{% endif %}.
-        {% endif %}
-        {% if p.nb_passees %}
-          Machines dont l'heure est passée, masquées : {{ p.nb_passees }}.
         {% endif %}
         {% if p.quand %}Calculé à {{ p.quand|date:"H:i" }}.{% endif %}</p>
 

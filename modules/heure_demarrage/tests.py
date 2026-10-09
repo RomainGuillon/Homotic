@@ -580,6 +580,7 @@ class CalculDesMachines(TestCase):
             resultat = machines.calculer()
             relu = machines.dernier_resultat()
             set_setting("machine_tolerance_cts", "0", module=api.MODULE)
+            api.set_machines_demandees(normal=1)
             strict = machines.calculer()
         cycle, = resultat["cycles"]
         self.assertEqual(cycle["heure"], "10:10")
@@ -612,6 +613,7 @@ class CalculDesMachines(TestCase):
         with _besoins(_soleil(), _tarifs_tempo()):
             with Horloge(7):
                 matin = machines.calculer()
+            api.set_machines_demandees(normal=1)
             with Horloge(8, 30):
                 midi = machines.calculer()
         self.assertEqual([c["heure"] for c in matin["cycles"]], ["08:00"])
@@ -625,6 +627,7 @@ class CalculDesMachines(TestCase):
         with _besoins(_soleil(), _tarifs_tempo()):
             with Horloge(7):
                 machines.calculer()
+            api.set_machines_demandees(normal=2)
             with Horloge(8, 30):
                 resultat = machines.calculer()
         self.assertEqual([c["heure"] for c in resultat["cycles"]], ["08:30", "10:10"])
@@ -639,8 +642,6 @@ class CalculDesMachines(TestCase):
                 resultat = machines.replanifier_restantes()
         cycle, = resultat["cycles"]
         self.assertEqual(cycle["heure"], "08:30")
-        # Le nombre saisi n'est pas touché
-        self.assertEqual(api.machines_demandees(), {"normal": 2, "court": 0})
 
     def test_replanifier_sans_machine_a_lancer_ne_touche_a_rien(self):
         with _besoins(_soleil(), _tarifs_tempo()):
@@ -650,7 +651,7 @@ class CalculDesMachines(TestCase):
             with Horloge(11):
                 self.assertIsNone(machines.replanifier_restantes())
                 plan = machines.dernier_resultat()
-        self.assertEqual(plan["cycles"][0]["heure"], "08:00")
+        self.assertEqual(plan["cycles"], [])
 
     def test_une_machine_dont_l_heure_est_passee_n_est_plus_affichee(self):
         """Sans aucun recalcul : c'est l'heure qu'il est qui retire la ligne."""
@@ -659,7 +660,6 @@ class CalculDesMachines(TestCase):
             machines.calculer()
             plan = machines.dernier_resultat()
             self.assertEqual([c["heure"] for c in plan["affichees"]], ["08:00", "09:40"])
-            self.assertEqual(plan["nb_passees"], 0)
             self.assertAlmostEqual(plan["total"]["kwh"], 0.60)
 
         with Horloge(8):  # pile à l'heure : la machine reste à lancer
@@ -669,9 +669,8 @@ class CalculDesMachines(TestCase):
         with Horloge(8, 30):
             plan = machines.dernier_resultat()
             self.assertEqual([c["heure"] for c in plan["affichees"]], ["09:40"])
-            self.assertEqual(plan["nb_passees"], 1)
-            # Le plan complet est gardé : le calcul en a besoin
-            self.assertEqual(len(plan["cycles"]), 2)
+            # Passée, elle sort du plan : plus prise en compte du tout
+            self.assertEqual([c["heure"] for c in plan["cycles"]], ["09:40"])
             # Les totaux ne comptent plus que ce qui reste à lancer
             self.assertAlmostEqual(plan["total"]["kwh"], 0.30)
             self.assertEqual(info.plan_machines(), "09:40 normal")
@@ -679,7 +678,7 @@ class CalculDesMachines(TestCase):
         with Horloge(11):
             plan = machines.dernier_resultat()
             self.assertEqual(plan["affichees"], [])
-            self.assertEqual(plan["nb_passees"], 2)
+            self.assertEqual(plan["cycles"], [])
             self.assertEqual(plan["restantes"], 0)
             self.assertIsNone(plan["prochaine"])
             self.assertIsNone(plan["total"]["cout"])
@@ -693,7 +692,6 @@ class CalculDesMachines(TestCase):
             plan = machines.dernier_resultat()
         cycle, = plan["affichees"]
         self.assertEqual((cycle["conseil"], cycle["heure"]), ("hc", "22:00"))
-        self.assertEqual(plan["nb_passees"], 0)
 
     def test_un_plan_de_la_veille_est_perime(self):
         with Horloge(7), _besoins(_soleil(), _tarifs_tempo()):
@@ -709,6 +707,7 @@ class CalculDesMachines(TestCase):
     def test_un_plan_de_la_veille_ne_compte_pas_comme_lance(self):
         with Horloge(7), _besoins(_soleil(), _tarifs_tempo()):
             machines.calculer()
+        api.set_machines_demandees(normal=1)
         with Horloge(12, jour=5), _besoins(_soleil(jour=5), _tarifs_tempo()):
             resultat = machines.calculer()
         cycle, = resultat["cycles"]
@@ -747,6 +746,7 @@ class CalculDesMachines(TestCase):
         nuages = plateau_local(datetime(2026, 10, 4).astimezone(), kw=0.0)
         with Horloge(7), _besoins(nuages, _tarifs_tempo("RED")):
             sans_soleil = machines.calculer()
+        api.set_machines_demandees(normal=1)
         with Horloge(7), _besoins(_soleil(), _tarifs_tempo("RED")):
             au_soleil = machines.calculer()
         # Le moins cher des deux : la nuit sans soleil, la journée au soleil
@@ -778,6 +778,7 @@ class CalculDesMachines(TestCase):
     def _sans_place(self, tarifs, demain=None):
         """Calcul lancé à 21 h, switch sur off : la plage est finie."""
         api.set_machines_optimise(False)
+        api.set_machines_demandees(normal=1)
         with Horloge(21), _besoins(_soleil(), tarifs, demain=demain):
             return machines.calculer()
 
@@ -903,6 +904,7 @@ class CalculDesMachines(TestCase):
             self.assertTrue(lendemain["perime"])
             self.assertIsNone(lendemain["prochaine_demain"])
             self.assertIsNone(info.plan_machines())
+        api.set_machines_demandees(normal=1)
         with Horloge(7, jour=5), _besoins(_soleil(jour=5), _tarifs_tempo()):
             cycle, = machines.calculer()["cycles"]
         self.assertEqual((cycle["conseil"], cycle["heure"]), ("jour", "08:00"))
@@ -938,7 +940,8 @@ class CalculDesMachines(TestCase):
         with Horloge(7), _besoins(_soleil(), _tarifs_tempo()):
             heure = scenario.recalculer_machines(normales="2", courtes="")
         self.assertEqual(heure, "08:00")
-        self.assertEqual(api.machines_demandees(), {"normal": 2, "court": 0})
+        # Demande prise en compte : les nombres repartent à zéro
+        self.assertEqual(api.machines_demandees(), {"normal": 0, "court": 0})
         self.assertTrue(
             LogEntry.objects.filter(
                 module=api.MODULE, message__startswith="Calcul des machines"
@@ -952,9 +955,8 @@ class CalculDesMachines(TestCase):
                 machines.calculer()
             with Horloge(8, 30):
                 heure = scenario.recalculer_machines()
+                self.assertEqual(len(machines.dernier_resultat()["cycles"]), 1)
         self.assertEqual(heure, "08:30")
-        self.assertEqual(len(machines.dernier_resultat()["cycles"]), 1)
-        self.assertEqual(api.machines_demandees(), {"normal": 2, "court": 0})
 
     def test_action_de_scenario_refuse_un_nombre_illisible(self):
         with self.assertRaises(ValueError):
@@ -1495,7 +1497,8 @@ class PagesDuModule(TestCase):
     def test_planifier_depuis_l_onglet(self):
         reponse = self._poster(action="machines", machines_normal="1", machines_court="1")
         self.assertRedirects(reponse, self.URL)
-        self.assertEqual(api.machines_demandees(), {"normal": 1, "court": 1})
+        # Calcul fait : les nombres saisis repartent à zéro
+        self.assertEqual(api.machines_demandees(), {"normal": 0, "court": 0})
 
         with Horloge(7):
             page = self.client.get(self.URL)
@@ -1617,16 +1620,14 @@ class PagesDuModule(TestCase):
         self.assertNotIn("Tout replanifier", bloc)
         self.assertNotContains(onglet, lancer.format("08:00"))
         self.assertContains(onglet, lancer.format("09:40"))
-        self.assertContains(onglet, "masquées : 1")
 
         # 11:00 : plus rien à lancer
         with Horloge(11):
             bloc = self._bloc_machines()
             onglet = self.client.get(self.URL)
         self.assertNotIn("09:40", bloc)
-        self.assertIn("Plus de machine à lancer", bloc)
-        self.assertContains(onglet, "Plus de machine à lancer")
-        self.assertContains(onglet, "masquées : 2")
+        self.assertIn("Aucune machine prévue aujourd'hui", bloc)
+        self.assertContains(onglet, "Aucune machine prévue aujourd'hui")
         self.assertFalse(LogEntry.objects.filter(level=LogEntry.ERROR).exists())
 
     def test_le_bloc_du_chauffe_eau_garde_sa_cle(self):
