@@ -37,7 +37,7 @@ def publier_variables():
     return "ok"
 
 
-def recalculer_machines(normales="", courtes=""):
+def recalculer_machines(normales="", courtes="", vaisselles=""):
     """Refait le plan des machines et retourne l'heure de la prochaine.
 
     ``normales`` / ``courtes`` : nombre de cycles voulus, placés à partir de
@@ -46,8 +46,8 @@ def recalculer_machines(normales="", courtes=""):
     (par exemple après une mise à jour des prévisions), sans en ajouter.
     Le créneau du chauffe-eau n'est jamais modifié par cette action.
     """
-    if str(normales or "").strip() or str(courtes or "").strip():
-        api.set_machines_demandees(normal=normales, court=courtes)
+    if any(str(v or "").strip() for v in (normales, courtes, vaisselles)):
+        api.set_machines_demandees(normal=normales, court=courtes, vaisselle=vaisselles)
         plan = machines.calculer(tracer=True)
     else:
         plan = machines.replanifier_restantes() or machines.dernier_resultat()
@@ -73,6 +73,8 @@ SCENARIO = [
          {"nom": "normales", "label": "Cycles normaux", "type": "nombre",
           "placeholder": "inchangé", "largeur": 110},
          {"nom": "courtes", "label": "Cycles courts", "type": "nombre",
+          "placeholder": "inchangé", "largeur": 110},
+         {"nom": "vaisselles", "label": "Lave-vaisselle", "type": "nombre",
           "placeholder": "inchangé", "largeur": 110},
      ]},
 ]

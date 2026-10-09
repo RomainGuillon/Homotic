@@ -1,4 +1,4 @@
-{# Bloc tableau de bord : heures de lancement des machines (lave-linge lancé à la main). #}
+{# Bloc tableau de bord : heures de lancement du lave-linge et du lave-vaisselle (lancés à la main). #}
 <div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-3">
 <form method="post" action="{% url 'core:module_tab' 'heure_demarrage' %}"
       class="d-flex flex-wrap align-items-end gap-2">
@@ -17,6 +17,12 @@
            id="blocMachinesCourt" name="machines_court"
            min="0" max="{{ max_machines }}" value="{{ demandes.court }}">
   </div>
+  <div>
+    <label class="form-label small text-secondary mb-1" for="blocMachinesVaisselle">Lave-vaisselle</label>
+    <input type="number" class="form-control form-control-sm" style="width:6rem"
+           id="blocMachinesVaisselle" name="machines_vaisselle"
+           min="0" max="{{ max_machines }}" value="{{ demandes.vaisselle }}">
+  </div>
   <button class="btn btn-sm btn-primary">Calculer</button>
 </form>
 {% include "heure_demarrage/_switch_optimise.html" with retour="dashboard" suffixe="Bloc" %}
@@ -33,8 +39,13 @@
       calculé un autre jour — relancer « Calculer ».</p>
   {% endif %}
 
-  {# Seules les machines encore à lancer : l'heure passée, la ligne disparaît. #}
-  {% for c in p.affichees %}
+  {# Seules les machines encore à lancer : l'heure passée, la ligne disparaît.
+     Une partie par appareil (lave-linge, lave-vaisselle). #}
+  {% for groupe in p.par_appareil %}
+    {% if p.par_appareil|length > 1 %}
+      <div class="small text-uppercase text-secondary fw-semibold {% if not forloop.first %}mt-3{% endif %}">{{ groupe.nom }}</div>
+    {% endif %}
+  {% for c in groupe.cycles %}
     <div class="d-flex justify-content-between align-items-center py-2 {% if not forloop.last %}border-bottom{% endif %}">
       <div>
         <span class="fs-4 fw-bold lh-1"
@@ -56,6 +67,7 @@
             jusqu'à {{ c.fin|date:"H:i" }} ·
             solaire {{ c.solaire_kwh|floatformat:2 }} sur {{ c.kwh|floatformat:2 }} kWh
             {% if c.avec_ballon %}· en même temps que le chauffe-eau{% endif %}
+            {% if c.ensemble %}· en même temps que le {{ c.ensemble|lower }}{% endif %}
           {% else %}
             plus de créneau aujourd'hui
           {% endif %}
@@ -67,6 +79,7 @@
         </div>
       {% endif %}
     </div>
+  {% endfor %}
   {% empty %}
     {% if not p.perime %}
       <p class="text-secondary small mb-0">Plus de machine à lancer aujourd'hui.</p>

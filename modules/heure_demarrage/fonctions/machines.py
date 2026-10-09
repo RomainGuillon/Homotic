@@ -5,11 +5,18 @@
 # conserver la présente mention de copyright.
 # Voir le fichier LICENSE à la racine du dépôt.
 
-"""Heures de lancement des machines (lave-linge lancé à la main).
+"""Heures de lancement des machines : lave-linge et lave-vaisselle, lancés à la main.
 
 On indique combien de cycles on veut faire dans la journée — normaux ou
-courts — et le module propose une heure de lancement pour chacun, là où le
-solaire en couvre le plus.
+courts pour le lave-linge, et des lavages pour le lave-vaisselle — et le
+module propose une heure de lancement pour chacun, là où le solaire en
+couvre le plus.
+
+**Deux appareils, sans priorité entre eux.** Chacun ne fait qu'un cycle à
+la fois, avec une pause entre deux. Ils sont placés l'un après l'autre, le
+second sur ce que le premier laisse, et les deux ordres sont essayés : le
+moins cher est retenu. Ils ne tournent ensemble que si le solaire couvre
+les deux.
 
 **Le chauffe-eau est prioritaire.** Son créneau n'est jamais recalculé ici :
 on lit le dernier calcul mémorisé (``calcul.dernier_resultat``) et on retire
@@ -21,7 +28,9 @@ Le surplus à chaque instant :
 
     surplus = production prévue − talon de la maison − chauffe-eau
 
-**Un cycle a deux phases**, qui ne pèsent pas pareil face au solaire :
+**Un cycle est une suite de phases** (``_phases``). Le lave-vaisselle donne
+les siennes — il chauffe quatre fois, dont le rinçage final une heure après
+le départ. Le lave-linge en a deux, qui ne pèsent pas pareil face au solaire :
 
 - la *chauffe* de l'eau, en début de cycle : la résistance tire sa pleine
   puissance par salves. Une moyenne sur 30 minutes la ferait passer pour
@@ -182,39 +191,84 @@ def _courbes(maintenant, points, talon_kw, ballon):
     return surplus, ballon_kw
 
 
-def _evaluer(depart, profil, pointe_kw, surplus, ballon_kw, prix):
+def _appareil(profil):
+    """L'appareil d'un profil : deux cycles du même appareil ne se
+    chevauchent jamais ; deux appareils différents, si le solaire suit."""
+    return profil.get("appareil") or "Lave-linge"
+
+
+def _phases(profil):
+    """Phases d'un cycle : ``[(minutes, kWh, chauffe)]``.
+
+    Un profil qui ne donne pas ses phases (le lave-linge) en a deux : la
+    chauffe en début de cycle, puis le reste.
+    """
+    if profil.get("phases"):
+        return [
+            (int(p["duree_min"]), float(p["kwh"]), bool(p["chauffe"]))
+            for p in profil["phases"] if int(p["duree_min"]) > 0
+        ]
+    chauffe_min = profil["chauffe_min"]
+    reste_min = profil["duree_min"] - chauffe_min
+    phases = []
+    if chauffe_min > 0:
+        phases.append((chauffe_min, profil["chauffe_kwh"], True))
+    if reste_min > 0:
+        phases.append((reste_min, profil["kwh"] - profil["chauffe_kwh"], False))
+    return phases
+
+
+def _besoins(profil, pointe_kw):
+    """Ce que le cycle tire, minute par minute : ``[(kW moyens, seuil, pointe)]``.
+
+    - une phase de *chauffe* tire la résistance à pleine puissance (par
+      salves, ou en continu). Une moyenne la ferait passer pour couverte
+      par un surplus qui ne l'est pas : pendant la chauffe, le solaire ne
+      fournit que ``surplus / pointe`` de ce qui est tiré, le reste vient
+      du réseau. Son seuil est la pointe ;
+    - les autres phases (brassage, rinçage, séchage…) sont faibles et
+      continues : couvertes dès que le surplus dépasse leur puissance.
+      Pas de pointe (``None``), le seuil est leur puissance.
+
+    La pointe est la résistance de l'appareil (``pointe_kw`` du profil, à
+    défaut celle passée au calcul), jamais moins que la moyenne de la phase.
+    """
+    pointe_appareil = float(profil.get("pointe_kw") or pointe_kw)
+    besoins = []
+    for duree, kwh, chauffe in _phases(profil):
+        kw = kwh / (duree / 60.0)
+        if chauffe:
+            pointe = max(pointe_appareil, kw)
+            besoins += [(kw, pointe, pointe)] * duree
+        else:
+            besoins += [(kw, kw, None)] * duree
+    return besoins
+
+
+def _evaluer(depart, besoins, surplus, ballon_kw, prix, autres=None):
     """Bilan d'un cycle lancé à la minute ``depart``, ou ``None`` s'il est exclu.
 
-    Exclu = il tournerait en même temps que le chauffe-eau sans que le
-    solaire couvre les deux. Le ballon est prioritaire : on ne lui ajoute
-    pas une machine que le réseau devrait alimenter.
+    Exclu = il tournerait en même temps que le chauffe-eau (``ballon_kw``)
+    ou qu'un autre appareil déjà placé (``autres``) sans que le solaire
+    couvre les deux. ``surplus`` est ce qui reste une fois ceux-là servis.
     """
-    duree = profil["duree_min"]
-    chauffe_min = profil["chauffe_min"]
-    reste_min = duree - chauffe_min
-
-    # Puissances moyennes de chaque phase. La chauffe est tirée par salves à
-    # la puissance de la résistance, jamais moins que sa propre moyenne.
-    p_chauffe = profil["chauffe_kwh"] / (chauffe_min / 60.0) if chauffe_min else 0.0
-    pointe = max(pointe_kw, p_chauffe)
-    p_reste = (
-        (profil["kwh"] - profil["chauffe_kwh"]) / (reste_min / 60.0) if reste_min else 0.0
-    )
-
     achat = cout = marge = 0.0
-    avec_ballon = False
-    for j in range(duree):
+    avec_ballon = avec_autre = False
+    for j, (kw, seuil, pointe) in enumerate(besoins):
         m = depart + j
-        dispo = surplus[m] if m < _HORIZON_MIN else 0.0
-        if j < chauffe_min:
-            seuil = pointe
-            achat_min = (p_chauffe / 60.0) * (1.0 - min(1.0, dispo / pointe))
+        dans = m < _HORIZON_MIN
+        dispo = surplus[m] if dans else 0.0
+        if pointe:
+            achat_min = (kw / 60.0) * (1.0 - min(1.0, dispo / pointe))
         else:
-            seuil = p_reste
-            achat_min = max(0.0, p_reste - dispo) / 60.0
+            achat_min = max(0.0, kw - dispo) / 60.0
 
-        if m < _HORIZON_MIN and ballon_kw[m] > 0:
+        if dans and ballon_kw[m] > 0:
             avec_ballon = True
+            if dispo + 1e-9 < seuil:
+                return None
+        if dans and autres is not None and autres[m] > 0:
+            avec_autre = True
             if dispo + 1e-9 < seuil:
                 return None
 
@@ -228,6 +282,7 @@ def _evaluer(depart, profil, pointe_kw, surplus, ballon_kw, prix):
         "cout_jour": cout if prix is not None else None,
         "marge_kwh": marge,
         "avec_ballon": avec_ballon,
+        "avec_autre": avec_autre,
     }
 
 
@@ -300,132 +355,178 @@ def planifier(*, maintenant, points, profils, demandes, pointe_kw, talon_kw,
     premier = -(-premier // PAS_DEPART_MIN) * PAS_DEPART_MIN  # arrondi au pas supérieur
     departs = list(range(premier, _minutes_hhmm(plage[1]) + 1, PAS_DEPART_MIN))
 
-    types = [t for t in profils if restant.get(t, 0) > 0]
-    bilans = {
-        t: [_evaluer(d, profils[t], pointe_kw, surplus, ballon_kw, prix) for d in departs]
-        for t in types
-    }
+    besoins = {t: _besoins(profils[t], pointe_kw) for t in profils}
 
-    def note(bilan, depart):
-        """(critère principal, départage), en entiers.
+    def placer(types_groupe, surplus_g, autres):
+        """Place les cycles d'un seul appareil — il n'en fait qu'un à la
+        fois. Retourne ``(places, non placés par type)``."""
+        types = [t for t in types_groupe if restant.get(t, 0) > 0]
+        bilans = {
+            t: [_evaluer(d, besoins[t], surplus_g, ballon_kw, prix, autres) for d in departs]
+            for t in types
+        }
 
-        Le critère principal est arrondi au dixième de centime (ou au
-        centième de kWh sans tarifs) : en dessous, l'écart entre deux
-        créneaux est plus petit que l'erreur de la prévision, et c'est au
-        départage de choisir — sinon « au plus tôt » ne jouerait jamais.
-        """
-        if prix is not None:
-            principal = round(bilan["cout_jour"] * 1000)
-        else:
-            principal = round(bilan["import_kwh"] * 100)
-        if ajustement == "max":
-            departage = -round(bilan["marge_kwh"] * 1000)
-        else:
-            departage = depart
-        return principal, departage
+        def note(bilan, depart):
+            """(critère principal, départage), en entiers.
 
-    def suivant(i, type_cycle):
-        """Indice du premier départ possible après un cycle lancé à departs[i]."""
-        libre = departs[i] + profils[type_cycle]["duree_min"] + pause_min
-        j = i + 1
-        while j < len(departs) and departs[j] < libre:
-            j += 1
-        return j
-
-    # --- Recherche du meilleur plan ---
-    # État : (indice du départ examiné, cycles restant à placer par type).
-    # Valeur : (cycles non placés, coût, départage), à minimiser dans cet
-    # ordre — placer tous les cycles passe avant tout.
-    memo = {}
-
-    def resoudre(i, reste):
-        if not any(reste):
-            return (0, 0, 0), None
-        if i >= len(departs):
-            return (sum(reste), 0, 0), None
-        cle = (i, reste)
-        if cle in memo:
-            return memo[cle]
-
-        meilleur = (resoudre(i + 1, reste)[0], None)  # ne rien lancer ici
-        for k, type_cycle in enumerate(types):
-            bilan = bilans[type_cycle][i]
-            if reste[k] == 0 or bilan is None:
-                continue
-            apres = reste[:k] + (reste[k] - 1,) + reste[k + 1:]
-            suite, _ = resoudre(suivant(i, type_cycle), apres)
-            principal, departage = note(bilan, departs[i])
-            total = (suite[0], suite[1] + principal, suite[2] + departage)
-            if total < meilleur[0]:
-                meilleur = (total, k)
-        memo[cle] = meilleur
-        return meilleur
-
-    # --- Lecture du plan ---
-    places = []
-    i, reste = 0, tuple(restant[t] for t in types)
-    while any(reste) and i < len(departs):
-        _valeur, choix = resoudre(i, reste)
-        if choix is None:
-            i += 1
-            continue
-        type_cycle = types[choix]
-        places.append((departs[i], type_cycle, bilans[type_cycle][i]))
-        reste = reste[:choix] + (reste[choix] - 1,) + reste[choix + 1:]
-        i = suivant(i, type_cycle)
-
-    # --- Tolérance ---
-    def assouplir(places):
-        """Déplace chaque cycle parmi les créneaux qui valent le sien.
-
-        Le plan trouvé est le moins cher au dixième de centime près. Pour
-        chaque cycle, dans l'ordre, on retient parmi les départs qui ne
-        coûtent pas plus que le sien + la tolérance celui que l'ajustement
-        préfère : le plus tôt (« faible ») ou le plus productif (« max »).
-
-        Ce qui ne bouge pas : un départ exclu par le chauffe-eau le reste,
-        la pause entre deux cycles est tenue (le cycle suivant n'a pas
-        encore bougé, on lui laisse sa place), et un cycle ne passe pas
-        au-dessus de son plafond s'il était en dessous.
-
-        Retourne des ``(départ, type, bilan, départ d'origine, bilan
-        d'origine)``.
-        """
-        souples = []
-        libre = departs[0]
-        for rang, (depart, type_cycle, bilan) in enumerate(places):
-            duree = profils[type_cycle]["duree_min"]
-            if rang + 1 < len(places):
-                limite = places[rang + 1][0] - pause_min - duree
+            Le critère principal est arrondi au dixième de centime (ou au
+            centième de kWh sans tarifs) : en dessous, l'écart entre deux
+            créneaux est plus petit que l'erreur de la prévision, et c'est au
+            départage de choisir — sinon « au plus tôt » ne jouerait jamais.
+            """
+            if prix is not None:
+                principal = round(bilan["cout_jour"] * 1000)
             else:
-                limite = departs[-1]
-            plafond = (plafonds or {}).get(type_cycle)
-            cout = bilan["cout_jour"]
-            retenu, cle_retenue = (depart, bilan), None
-            for d, b in zip(departs, bilans[type_cycle]):
-                if b is None or not libre <= d <= limite:
-                    continue
-                if b["cout_jour"] > cout + tolerance + 1e-9:
-                    continue
-                if _cote(b["cout_jour"], plafond) > _cote(cout, plafond):
-                    continue
-                if ajustement == "max":
-                    # À production égale, le cycle reste où il était.
-                    cle = (-round(b["marge_kwh"] * 1000), d != depart, d)
-                else:
-                    cle = (d,)
-                if cle_retenue is None or cle < cle_retenue:
-                    retenu, cle_retenue = (d, b), cle
-            souples.append((retenu[0], type_cycle, retenu[1], depart, bilan))
-            libre = retenu[0] + duree + pause_min
-        return souples
+                principal = round(bilan["import_kwh"] * 100)
+            if ajustement == "max":
+                departage = -round(bilan["marge_kwh"] * 1000)
+            else:
+                departage = depart
+            return principal, departage
 
-    if tolerance > 0 and prix is not None and places:
-        if plafonds is None and comparer_hc:
-            plafonds = {t: profils[t]["kwh"] * tarifs["hc"] for t in types}
-        places = assouplir(places)
-    else:
-        places = [(d, t, b, d, b) for d, t, b in places]
+        def suivant(i, type_cycle):
+            """Indice du premier départ possible après un cycle lancé à departs[i]."""
+            libre = departs[i] + profils[type_cycle]["duree_min"] + pause_min
+            j = i + 1
+            while j < len(departs) and departs[j] < libre:
+                j += 1
+            return j
+
+        # --- Recherche du meilleur plan ---
+        # État : (indice du départ examiné, cycles restant à placer par type).
+        # Valeur : (cycles non placés, coût, départage), à minimiser dans cet
+        # ordre — placer tous les cycles passe avant tout.
+        memo = {}
+
+        def resoudre(i, reste):
+            if not any(reste):
+                return (0, 0, 0), None
+            if i >= len(departs):
+                return (sum(reste), 0, 0), None
+            cle = (i, reste)
+            if cle in memo:
+                return memo[cle]
+
+            meilleur = (resoudre(i + 1, reste)[0], None)  # ne rien lancer ici
+            for k, type_cycle in enumerate(types):
+                bilan = bilans[type_cycle][i]
+                if reste[k] == 0 or bilan is None:
+                    continue
+                apres = reste[:k] + (reste[k] - 1,) + reste[k + 1:]
+                suite, _ = resoudre(suivant(i, type_cycle), apres)
+                principal, departage = note(bilan, departs[i])
+                total = (suite[0], suite[1] + principal, suite[2] + departage)
+                if total < meilleur[0]:
+                    meilleur = (total, k)
+            memo[cle] = meilleur
+            return meilleur
+
+        # --- Lecture du plan ---
+        places = []
+        i, reste = 0, tuple(restant[t] for t in types)
+        while any(reste) and i < len(departs):
+            _valeur, choix = resoudre(i, reste)
+            if choix is None:
+                i += 1
+                continue
+            type_cycle = types[choix]
+            places.append((departs[i], type_cycle, bilans[type_cycle][i]))
+            reste = reste[:choix] + (reste[choix] - 1,) + reste[choix + 1:]
+            i = suivant(i, type_cycle)
+
+        # --- Tolérance ---
+        def assouplir(places):
+            """Déplace chaque cycle parmi les créneaux qui valent le sien.
+
+            Le plan trouvé est le moins cher au dixième de centime près. Pour
+            chaque cycle, dans l'ordre, on retient parmi les départs qui ne
+            coûtent pas plus que le sien + la tolérance celui que l'ajustement
+            préfère : le plus tôt (« faible ») ou le plus productif (« max »).
+
+            Ce qui ne bouge pas : un départ exclu par le chauffe-eau le reste,
+            la pause entre deux cycles est tenue (le cycle suivant n'a pas
+            encore bougé, on lui laisse sa place), et un cycle ne passe pas
+            au-dessus de son plafond s'il était en dessous.
+
+            Retourne des ``(départ, type, bilan, départ d'origine, bilan
+            d'origine)``.
+            """
+            souples = []
+            libre = departs[0]
+            for rang, (depart, type_cycle, bilan) in enumerate(places):
+                duree = profils[type_cycle]["duree_min"]
+                if rang + 1 < len(places):
+                    limite = places[rang + 1][0] - pause_min - duree
+                else:
+                    limite = departs[-1]
+                plafond = (plafonds_g or {}).get(type_cycle)
+                cout = bilan["cout_jour"]
+                retenu, cle_retenue = (depart, bilan), None
+                for d, b in zip(departs, bilans[type_cycle]):
+                    if b is None or not libre <= d <= limite:
+                        continue
+                    if b["cout_jour"] > cout + tolerance + 1e-9:
+                        continue
+                    if _cote(b["cout_jour"], plafond) > _cote(cout, plafond):
+                        continue
+                    if ajustement == "max":
+                        # À production égale, le cycle reste où il était.
+                        cle = (-round(b["marge_kwh"] * 1000), d != depart, d)
+                    else:
+                        cle = (d,)
+                    if cle_retenue is None or cle < cle_retenue:
+                        retenu, cle_retenue = (d, b), cle
+                souples.append((retenu[0], type_cycle, retenu[1], depart, bilan))
+                libre = retenu[0] + duree + pause_min
+            return souples
+
+        plafonds_g = plafonds
+        if tolerance > 0 and prix is not None and places:
+            if plafonds_g is None and comparer_hc:
+                plafonds_g = {t: profils[t]["kwh"] * tarifs["hc"] for t in types}
+            places = assouplir(places)
+        else:
+            places = [(d, t, b, d, b) for d, t, b in places]
+        return places, {t: n for t, n in zip(types, reste) if n}
+
+    # --- Plusieurs appareils : pas de priorité entre eux ---
+    # Le chauffe-eau est déjà retiré du surplus. Les appareils sont placés
+    # l'un après l'autre, le second sur ce que le premier laisse, et chaque
+    # ordre est essayé : on garde le moins cher. Deux appareils ne tournent
+    # ensemble que si le solaire couvre les deux — leurs coûts restent
+    # alors indépendants, puisque le chevauchement ne coûte rien.
+    groupes = {}
+    for t in profils:
+        if restant.get(t, 0) > 0:
+            groupes.setdefault(_appareil(profils[t]), []).append(t)
+
+    def essayer(ordre):
+        places, non_places = [], {}
+        autres = [0.0] * _HORIZON_MIN
+        for nom in ordre:
+            surplus_g = [max(0.0, s - o) for s, o in zip(surplus, autres)]
+            places_g, reste_g = placer(groupes[nom], surplus_g, autres)
+            places += places_g
+            non_places.update(reste_g)
+            for depart, type_cycle, *_ in places_g:
+                for j, (_kw, seuil, _pointe) in enumerate(besoins[type_cycle]):
+                    if depart + j < _HORIZON_MIN:
+                        autres[depart + j] += seuil
+        return places, non_places
+
+    def valeur(essai):
+        places, non_places = essai
+        cout = sum(
+            round(b["cout_jour"] * 1000) if prix is not None
+            else round(b["import_kwh"] * 100)
+            for _d, _t, b, *_ in places
+        )
+        return (sum(non_places.values()), cout, sum(d for d, *_ in places))
+
+    ordres = [list(groupes)]
+    if len(groupes) > 1:
+        ordres.append(list(reversed(list(groupes))))
+    places, non_places = min((essayer(o) for o in ordres), key=valeur)
 
     cycles = []
     for depart, type_cycle, bilan, depart_origine, bilan_origine in places:
@@ -439,8 +540,8 @@ def planifier(*, maintenant, points, profils, demandes, pointe_kw, talon_kw,
             )
         cycles.append(cycle)
     cycles.sort(key=lambda c: c["debut"])
+    _marquer_ensemble(cycles)
 
-    non_places = {t: n for t, n in zip(types, reste) if n}
     if lendemain is not None and tarifs and non_places:
         cycles += _reporter(
             non_places, profils, tarifs, lendemain,
@@ -453,6 +554,20 @@ def planifier(*, maintenant, points, profils, demandes, pointe_kw, talon_kw,
                 cycles.append(_cycle(profils[type_cycle], tarifs, None, None))
 
     return {"cycles": cycles, "non_places": non_places}
+
+
+def _marquer_ensemble(cycles):
+    """Note sur chaque cycle de jour l'autre appareil qui tourne en même
+    temps que lui (``ensemble``), pour l'écran et le Journal."""
+    for c in cycles:
+        c["ensemble"] = None
+    for i, c in enumerate(cycles):
+        for d in cycles[i + 1:]:
+            if (c.get("conseil") == "jour" and d.get("conseil") == "jour"
+                    and c["appareil"] != d["appareil"]
+                    and c["debut"] < d["fin"] and d["debut"] < c["fin"]):
+                c["ensemble"] = d["appareil"]
+                d["ensemble"] = c["appareil"]
 
 
 def _reporter(non_places, profils, tarifs, lendemain, **reglages):
@@ -541,6 +656,7 @@ def _cycle(profil, tarifs, debut, bilan, comparer_hc=True):
     cycle = {
         "type": profil["type"],
         "libelle": profil["libelle"],
+        "appareil": _appareil(profil),
         "duree_min": profil["duree_min"],
         "kwh": kwh,
         "debut": debut,
@@ -814,7 +930,7 @@ def calculer(tracer=False, demandes=None):
         demandes = api.machines_demandees()
         # La demande est prise en compte : les nombres saisis repartent à
         # zéro, une prochaine demande sera un nouveau calcul.
-        api.set_machines_demandees(normal=0, court=0)
+        api.set_machines_demandees(normal=0, court=0, vaisselle=0)
     profils = {t: api.profil_machine(t) for t, _libelle in api.TYPES_MACHINE}
     plage = api.plage_machines()
     ballon = _creneau_ballon(maintenant)
@@ -1026,6 +1142,13 @@ def _completer(resultat):
     total["cout_c"] = _centimes(total["cout"])
     resultat["total"] = total
     resultat["affichees"] = affichees
+    # Pour le bloc du tableau de bord : une partie par appareil.
+    par_appareil = {}
+    for cycle in affichees:
+        par_appareil.setdefault(cycle.get("appareil") or "Lave-linge", []).append(cycle)
+    resultat["par_appareil"] = [
+        {"nom": nom, "cycles": cycles} for nom, cycles in par_appareil.items()
+    ]
     # « À lancer aujourd'hui » : un cycle reporté à demain n'en fait pas
     # partie — son heure, lue aujourd'hui, déclencherait un rappel à tort.
     resultat["restantes"] = len(a_venir)
@@ -1111,7 +1234,9 @@ def detail_texte(r):
 
     demandes = [
         f"{n} × {p['libelle'].lower()} ({p['duree_min']} min, {p['kwh']:.2f} kWh "
-        f"dont {p['chauffe_kwh']:.2f} kWh de chauffe)"
+        f"dont {p['chauffe_kwh']:.2f} kWh de chauffe"
+        + (f", résistance {p['pointe_kw']:.2f} kW" if p.get("pointe_kw") else "")
+        + ")"
         for t, p in r["profils"].items()
         if (n := r["demandes"].get(t, 0))
     ]
@@ -1123,6 +1248,17 @@ def detail_texte(r):
         f"{r['talon_kwh_h']:.2f} kWh/h ; lancement possible de {r['plage'][0]} à "
         f"{r['plage'][1]}, {r['pause_min']} min entre deux cycles."
     )
+
+    appareils = {
+        p.get("appareil") or "Lave-linge"
+        for t, p in r["profils"].items() if r["demandes"].get(t, 0)
+    }
+    if len(appareils) > 1:
+        lignes.append(
+            "Lave-linge et lave-vaisselle : pas de priorité entre eux, les deux "
+            "ordres sont essayés et le moins cher est retenu. Ils ne tournent "
+            "ensemble que si le solaire couvre les deux."
+        )
 
     ballon = r.get("ballon")
     if ballon and ballon.get("termine"):
@@ -1247,6 +1383,11 @@ def detail_texte(r):
         )
         if c.get("avec_ballon"):
             ligne += " (en même temps que le chauffe-eau, le solaire couvre les deux)"
+        if c.get("ensemble"):
+            ligne += (
+                f" (en même temps que le {c['ensemble'].lower()}, le solaire "
+                f"couvre les deux)"
+            )
         if c.get("cout_hc") is not None and comparer:
             ligne += (
                 f" → {c['cout_jour']:.3f} € de jour contre {c['cout_hc']:.3f} € "

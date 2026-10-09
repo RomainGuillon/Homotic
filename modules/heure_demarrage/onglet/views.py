@@ -94,6 +94,13 @@ def _save_machines_params(request):
                     key, f"{int(parts[0]) % 24:02d}:{int(parts[1]) % 60:02d}",
                     module=api.MODULE,
                 )
+        elif kind == "phases" and raw:
+            try:
+                set_setting(key, api.ecrire_phases(api.lire_phases(raw)), module=api.MODULE)
+            except ValueError as exc:
+                messages.warning(
+                    request, f"Phases du lave-vaisselle non enregistrées : {exc}."
+                )
 
     journal("Profil des machines mis à jour", module=api.MODULE)
     debut, fin = api.plage_machines()
@@ -115,6 +122,7 @@ def _planifier_machines(request):
     api.set_machines_demandees(
         normal=request.POST.get("machines_normal"),
         court=request.POST.get("machines_court"),
+        vaisselle=request.POST.get("machines_vaisselle"),
     )
     plan = machines.calculer(tracer=True)
     if not plan["cycles"]:
@@ -253,7 +261,14 @@ def onglet(request):
             "demandes": api.machines_demandees(),
             "max_machines": api.MAX_MACHINES,
             "optimise": api.machines_optimise(),
-            "profils": [api.profil_machine(t) for t, _libelle in api.TYPES_MACHINE],
+            "profils": [
+                api.profil_machine(t) for t, _libelle in api.TYPES_MACHINE
+                if api.APPAREILS[t] == "Lave-linge"
+            ],
+            "vaisselle": {
+                **api.profil_machine("vaisselle"),
+                "phases_texte": api.ecrire_phases(api.profil_machine("vaisselle")["phases"]),
+            },
             "machine": {
                 "pointe_kw": f"{api.pointe_machine_kw():.2f}",
                 "plage_debut": api.plage_machines()[0],

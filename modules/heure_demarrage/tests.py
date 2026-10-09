@@ -941,7 +941,7 @@ class CalculDesMachines(TestCase):
             heure = scenario.recalculer_machines(normales="2", courtes="")
         self.assertEqual(heure, "08:00")
         # Demande prise en compte : les nombres repartent à zéro
-        self.assertEqual(api.machines_demandees(), {"normal": 0, "court": 0})
+        self.assertEqual(api.machines_demandees(), {"normal": 0, "court": 0, "vaisselle": 0})
         self.assertTrue(
             LogEntry.objects.filter(
                 module=api.MODULE, message__startswith="Calcul des machines"
@@ -995,15 +995,162 @@ class ReglagesDesMachines(TestCase):
     def test_nombre_de_machines_borne(self):
         self.assertEqual(
             api.set_machines_demandees(normal=99, court=-3),
-            {"normal": api.MAX_MACHINES, "court": 0},
+            {"normal": api.MAX_MACHINES, "court": 0, "vaisselle": 0},
         )
 
     def test_nombre_vide_laisse_la_valeur_en_place(self):
         api.set_machines_demandees(normal=2, court=1)
         self.assertEqual(
             api.set_machines_demandees(normal="", court=None),
-            {"normal": 2, "court": 1},
+            {"normal": 2, "court": 1, "vaisselle": 0},
         )
+
+
+# Profil du lave-vaisselle relevé le 07/10/2026 : 102 min, 1,71 kWh.
+PHASES_LV = [
+    {"duree_min": 14, "kwh": 0.48, "chauffe": True},
+    {"duree_min": 12, "kwh": 0.02, "chauffe": False},
+    {"duree_min": 17, "kwh": 0.45, "chauffe": True},
+    {"duree_min": 22, "kwh": 0.09, "chauffe": False},
+    {"duree_min": 8, "kwh": 0.21, "chauffe": True},
+    {"duree_min": 4, "kwh": 0.02, "chauffe": False},
+    {"duree_min": 11, "kwh": 0.40, "chauffe": True},
+    {"duree_min": 14, "kwh": 0.04, "chauffe": False},
+]
+PROFILS_LV = {
+    **PROFILS,
+    "vaisselle": {"type": "vaisselle", "libelle": "Lave-vaisselle",
+                  "appareil": "Lave-vaisselle", "duree_min": 102, "kwh": 1.71,
+                  "chauffe_min": 50, "chauffe_kwh": 1.54, "phases": PHASES_LV,
+                  "pointe_kw": 2.1},
+}
+
+
+class LaveVaisselle(SimpleTestCase):
+    """Deux appareils : le lave-linge et le lave-vaisselle, sans priorité."""
+
+    def _plan(self, **surcharges):
+        arguments = {"profils": PROFILS_LV,
+                     "demandes": {"normal": 1, "court": 0, "vaisselle": 1}}
+        arguments.update(surcharges)
+        return plan(**arguments)
+
+    def _cycle(self, resultat, type_cycle):
+        cycle, = [c for c in resultat["cycles"] if c["type"] == type_cycle]
+        return cycle
+
+    def test_le_lave_linge_seul_ne_change_pas(self):
+        """Ses deux phases tirées des réglages donnent le même besoin qu'avant."""
+        besoins = machines._besoins(PROFILS["normal"], 1.9)
+        self.assertEqual(len(besoins), 70)
+        self.assertEqual(besoins[0][1:], (1.9, 1.9))
+        self.assertAlmostEqual(besoins[30][0], 0.08 / 45 * 60)
+        self.assertIsNone(besoins[30][2])
+
+    def test_les_phases_du_lave_vaisselle(self):
+        besoins = machines._besoins(PROFILS_LV["vaisselle"], 1.9)
+        self.assertEqual(len(besoins), 102)
+        # Sa propre résistance, pas celle du lave-linge
+        self.assertEqual(besoins[0][2], 2.1)
+        # Le rinçage final chauffe encore, 77 minutes après le départ — à
+        # 2,18 kW de moyenne, au-dessus de la résistance réglée : c'est la
+        # moyenne qui sert de pointe
+        self.assertAlmostEqual(besoins[80][2], 0.40 / 11 * 60)
+        self.assertIsNone(besoins[95][2])
+        self.assertAlmostEqual(sum(kw for kw, _s, _p in besoins) / 60, 1.71)
+
+    def test_plein_soleil_les_deux_tournent_ensemble(self):
+        """4,7 kW de surplus : 1,9 + 2,1 kW passent ensemble, sans rien acheter."""
+        resultat = self._plan()
+        linge, vaisselle = self._cycle(resultat, "normal"), self._cycle(resultat, "vaisselle")
+        self.assertEqual((linge["heure"], vaisselle["heure"]), ("08:00", "08:00"))
+        self.assertEqual(linge["ensemble"], "Lave-vaisselle")
+        self.assertEqual(vaisselle["ensemble"], "Lave-linge")
+        self.assertAlmostEqual(linge["import_kwh"] + vaisselle["import_kwh"], 0.0)
+
+    def test_jamais_deux_chauffes_ensemble_sans_soleil_pour_les_deux(self):
+        """2,7 kW de surplus : chaque chauffe passe seule, aucune ne se chevauche."""
+        resultat = self._plan(points=plateau(3.0))
+        linge, vaisselle = self._cycle(resultat, "normal"), self._cycle(resultat, "vaisselle")
+        self.assertEqual((linge["conseil"], vaisselle["conseil"]), ("jour", "jour"))
+        self.assertAlmostEqual(linge["import_kwh"] + vaisselle["import_kwh"], 0.0)
+
+        def chauffes(cycle, pointe):
+            debut = int((cycle["debut"] - MINUIT).total_seconds() // 60)
+            return {
+                debut + j for j, (_kw, _s, p) in enumerate(
+                    machines._besoins(PROFILS_LV[cycle["type"]], 1.9)) if p
+            }
+        self.assertFalse(chauffes(linge, 1.9) & chauffes(vaisselle, 2.1))
+
+    def test_pas_de_priorite_le_moins_cher_gagne(self):
+        """Deux heures de soleil seulement : le lave-vaisselle, six fois plus
+        gourmand, les prend — le lave-linge passe après, même s'il est
+        placé en premier dans la liste."""
+        resultat = self._plan(points=plateau(2.5, debut=8, fin=10), comparer_hc=False)
+        vaisselle = self._cycle(resultat, "vaisselle")
+        linge = self._cycle(resultat, "normal")
+        self.assertEqual(vaisselle["heure"], "08:00")
+        self.assertAlmostEqual(vaisselle["import_kwh"], 0.0)
+        self.assertGreater(linge["debut"], vaisselle["debut"])
+
+    def test_deux_lave_vaisselle_se_suivent_avec_la_pause(self):
+        resultat = self._plan(demandes={"normal": 0, "court": 0, "vaisselle": 2})
+        premier, second = resultat["cycles"]
+        self.assertEqual(premier["heure"], "08:00")
+        self.assertGreaterEqual(second["debut"], premier["fin"] + timedelta(minutes=30))
+
+    def test_sans_place_heures_creuses_au_prix_du_lave_vaisselle(self):
+        resultat = self._plan(
+            demandes={"normal": 0, "court": 0, "vaisselle": 1}, maintenant=a(21)
+        )
+        cycle, = resultat["cycles"]
+        self.assertEqual((cycle["conseil"], cycle["heure"]), ("hc", "22:00"))
+        self.assertAlmostEqual(cycle["cout_hc"], 1.71 * BLEU["hc"])
+
+
+class ReglagesDuLaveVaisselle(TestCase):
+
+    def test_profil_par_defaut(self):
+        profil = api.profil_machine("vaisselle")
+        self.assertEqual(profil["duree_min"], 102)
+        self.assertAlmostEqual(profil["kwh"], 1.71)
+        self.assertAlmostEqual(profil["chauffe_kwh"], 1.54)
+        self.assertEqual(profil["pointe_kw"], 2.1)
+        self.assertEqual(profil["appareil"], "Lave-vaisselle")
+        self.assertEqual(len(profil["phases"]), 8)
+
+    def test_lire_et_ecrire_les_phases(self):
+        phases = api.lire_phases("10:0,5:chauffe ; 20:0.1\n5:0:c")
+        self.assertEqual(phases, [
+            {"duree_min": 10, "kwh": 0.5, "chauffe": True},
+            {"duree_min": 20, "kwh": 0.1, "chauffe": False},
+            {"duree_min": 5, "kwh": 0.0, "chauffe": True},
+        ])
+        self.assertEqual(api.ecrire_phases(phases), "10:0.50:chauffe; 20:0.10; 5:0.00:chauffe")
+
+    def test_phases_illisibles(self):
+        for texte in ("", "dix:0.5", "10:0.5:froid", "0:0.5", "10", "700:1"):
+            with self.subTest(texte=texte), self.assertRaises(ValueError):
+                api.lire_phases(texte)
+
+    def test_reglage_illisible_en_base_le_defaut_reprend(self):
+        set_setting("machine_vaisselle_phases", "n'importe quoi", module=api.MODULE)
+        self.assertEqual(api.profil_machine("vaisselle")["duree_min"], 102)
+
+    def test_le_nombre_de_lave_vaisselle_se_saisit_et_repart_a_zero(self):
+        api.set_machines_demandees(vaisselle=1)
+        with Horloge(7), _besoins(_soleil(), _tarifs_tempo()):
+            resultat = machines.calculer()
+        cycle, = resultat["cycles"]
+        self.assertEqual((cycle["type"], cycle["heure"]), ("vaisselle", "08:00"))
+        self.assertEqual(api.machines_demandees()["vaisselle"], 0)
+        self.assertIn("lave-vaisselle (102 min, 1.71 kWh", " ".join(resultat["detail"]))
+
+    def test_action_de_scenario(self):
+        with Horloge(7), _besoins(_soleil(), _tarifs_tempo()):
+            heure = scenario.recalculer_machines(vaisselles="1")
+        self.assertEqual(heure, "08:00")
 
 
 class ChauffeEauInchange(TestCase):
@@ -1498,7 +1645,7 @@ class PagesDuModule(TestCase):
         reponse = self._poster(action="machines", machines_normal="1", machines_court="1")
         self.assertRedirects(reponse, self.URL)
         # Calcul fait : les nombres saisis repartent à zéro
-        self.assertEqual(api.machines_demandees(), {"normal": 0, "court": 0})
+        self.assertEqual(api.machines_demandees(), {"normal": 0, "court": 0, "vaisselle": 0})
 
         with Horloge(7):
             page = self.client.get(self.URL)
@@ -1629,6 +1776,27 @@ class PagesDuModule(TestCase):
         self.assertIn("Aucune machine prévue aujourd'hui", bloc)
         self.assertContains(onglet, "Aucune machine prévue aujourd'hui")
         self.assertFalse(LogEntry.objects.filter(level=LogEntry.ERROR).exists())
+
+    def test_le_bloc_a_une_partie_lave_vaisselle(self):
+        self._poster(action="machines", machines_normal="1", machines_vaisselle="1")
+        with Horloge(7):
+            bloc = self._bloc_machines()
+            onglet = self.client.get(self.URL)
+        self.assertIn('name="machines_vaisselle"', bloc)
+        self.assertIn(">Lave-linge</div>", bloc)
+        self.assertIn(">Lave-vaisselle</div>", bloc)
+        self.assertContains(onglet, 'name="machine_vaisselle_phases"')
+        self.assertContains(onglet, "102 min")
+
+    def test_enregistrer_les_phases_du_lave_vaisselle(self):
+        champs = {k: d for k, d, _t in api.REGLAGES_MACHINES}
+        champs.update(action="machines_params", machine_vaisselle_phases="60:1,2:chauffe; 30:0.1")
+        self.client.post(self.URL, champs)
+        self.assertEqual(api.profil_machine("vaisselle")["duree_min"], 90)
+        champs.update(machine_vaisselle_phases="pas des phases")
+        reponse = self.client.post(self.URL, champs, follow=True)
+        self.assertContains(reponse, "Phases du lave-vaisselle non enregistrées")
+        self.assertEqual(api.profil_machine("vaisselle")["duree_min"], 90)
 
     def test_le_bloc_du_chauffe_eau_garde_sa_cle(self):
         """Le bloc d'origine reste le premier : sa place enregistrée dans la

@@ -46,6 +46,14 @@ REGLAGES_MACHINES = [
     ("machine_plage_fin", "20:00", "heure"),
     ("machine_pause_min", "30", "int0"),
     ("machine_tolerance_cts", "1.00", "float"),
+    # Lave-vaisselle : un seul type de lavage, décrit phase par phase.
+    # Relevé sur la prise « Raspberry » le 07/10/2026 (102 min, 1,71 kWh) :
+    # quatre chauffes à ~2,1 kW, dont le rinçage final une heure après le
+    # départ. Format : « minutes:kWh[:chauffe] » séparés par des « ; ».
+    ("machine_vaisselle_phases",
+     "14:0.48:chauffe; 12:0.02; 17:0.45:chauffe; 22:0.09; 8:0.21:chauffe; "
+     "4:0.02; 11:0.40:chauffe; 14:0.04", "phases"),
+    ("machine_vaisselle_pointe_kw", "2.10", "float"),
 ]
 
 DEFAUTS = {k: d for k, d, _t in REGLAGES + REGLAGES_MACHINES}
@@ -58,7 +66,13 @@ DEFAUTS = {k: d for k, d, _t in REGLAGES + REGLAGES_MACHINES}
 CLE_MACHINES_OPTIMISE = "machines_optimise"
 
 # Les deux cycles connus de la machine, dans l'ordre d'affichage.
-TYPES_MACHINE = [("normal", "Cycle normal"), ("court", "Cycle court")]
+TYPES_MACHINE = [
+    ("normal", "Cycle normal"), ("court", "Cycle court"), ("vaisselle", "Lave-vaisselle"),
+]
+
+# L'appareil de chaque type de cycle : deux cycles d'un même appareil se
+# suivent, deux appareils différents peuvent tourner ensemble.
+APPAREILS = {"normal": "Lave-linge", "court": "Lave-linge", "vaisselle": "Lave-vaisselle"}
 
 # Garde-fou de saisie : au-delà, ce n'est plus une journée de lessive mais
 # une faute de frappe, et le calcul explore toutes les combinaisons.
@@ -201,8 +215,71 @@ def _heure(key):
     return "00:00"
 
 
+def lire_phases(texte):
+    """Phases saisies « minutes:kWh[:chauffe] ; … » -> liste de dicts.
+
+    Lève ``ValueError`` sur une saisie illisible : mieux vaut garder
+    l'ancien profil que calculer sur un profil faux.
+    """
+    phases = []
+    for morceau in str(texte or "").replace("\n", ";").split(";"):
+        morceau = morceau.strip()
+        if not morceau:
+            continue
+        champs = [c.strip() for c in morceau.split(":")]
+        if len(champs) not in (2, 3):
+            raise ValueError(f"phase illisible « {morceau} »")
+        try:
+            duree = int(float(champs[0].replace(",", ".")))
+            kwh = float(champs[1].replace(",", "."))
+        except ValueError:
+            raise ValueError(f"phase illisible « {morceau} »") from None
+        chauffe = len(champs) == 3
+        if chauffe and champs[2].lower() not in ("c", "chauffe"):
+            raise ValueError(f"phase illisible « {morceau} » (3e champ : chauffe)")
+        if duree <= 0 or kwh < 0:
+            raise ValueError(f"phase illisible « {morceau} »")
+        phases.append({"duree_min": duree, "kwh": kwh, "chauffe": chauffe})
+    if not phases:
+        raise ValueError("aucune phase")
+    if sum(p["duree_min"] for p in phases) > 600:
+        raise ValueError("cycle de plus de 10 heures")
+    return phases
+
+
+def ecrire_phases(phases):
+    """Inverse de ``lire_phases`` : le texte affiché dans l'onglet."""
+    return "; ".join(
+        f"{p['duree_min']}:{p['kwh']:.2f}" + (":chauffe" if p["chauffe"] else "")
+        for p in phases
+    )
+
+
+def _profil_vaisselle():
+    """Profil du lave-vaisselle, d'après ses phases."""
+    try:
+        phases = lire_phases(get_reglage("machine_vaisselle_phases"))
+    except ValueError:
+        phases = lire_phases(DEFAUTS["machine_vaisselle_phases"])
+    chauffes = [p for p in phases if p["chauffe"]]
+    return {
+        "type": "vaisselle",
+        "libelle": dict(TYPES_MACHINE)["vaisselle"],
+        "appareil": APPAREILS["vaisselle"],
+        "duree_min": sum(p["duree_min"] for p in phases),
+        "kwh": sum(p["kwh"] for p in phases),
+        "chauffe_min": sum(p["duree_min"] for p in chauffes),
+        "chauffe_kwh": sum(p["kwh"] for p in chauffes),
+        "phases": phases,
+        "pointe_kw": max(0.1, _float("machine_vaisselle_pointe_kw")),
+    }
+
+
 def profil_machine(type_cycle):
-    """Profil de consommation d'un cycle : « normal » ou « court ».
+    """Profil de consommation d'un cycle : « normal », « court » ou « vaisselle ».
+
+    Le lave-vaisselle est décrit phase par phase (voir ``_profil_vaisselle``) ;
+    les cycles du lave-linge par les deux phases ci-dessous.
 
     Un cycle se décrit en deux phases, parce qu'elles ne pèsent pas pareil
     face au solaire : la **chauffe** de l'eau, en début de cycle, tire la
@@ -216,12 +293,15 @@ def profil_machine(type_cycle):
     """
     if type_cycle not in dict(TYPES_MACHINE):
         raise ValueError(f"type de cycle inconnu « {type_cycle} »")
+    if type_cycle == "vaisselle":
+        return _profil_vaisselle()
     prefixe = f"machine_{type_cycle}_"
     duree = max(1, _int(prefixe + "duree"))
     kwh = max(0.0, _float(prefixe + "kwh"))
     return {
         "type": type_cycle,
         "libelle": dict(TYPES_MACHINE)[type_cycle],
+        "appareil": APPAREILS[type_cycle],
         "duree_min": duree,
         "kwh": kwh,
         "chauffe_min": min(duree, max(0, _int(prefixe + "chauffe_min"))),
@@ -230,7 +310,7 @@ def profil_machine(type_cycle):
 
 
 def pointe_machine_kw():
-    """Puissance de la résistance de la machine pendant la chauffe (kW)."""
+    """Puissance de la résistance du lave-linge pendant la chauffe (kW)."""
     return max(0.1, _float("machine_pointe_kw"))
 
 
@@ -257,7 +337,7 @@ def tolerance_machines_cts():
 
 
 def machines_demandees():
-    """Nombre de cycles voulus dans la journée : ``{"normal": n, "court": n}``."""
+    """Nombre de cycles voulus dans la journée : ``{"normal": n, "court": n, "vaisselle": n}``."""
     demandes = {}
     for type_cycle, _libelle in TYPES_MACHINE:
         try:
@@ -268,14 +348,14 @@ def machines_demandees():
     return demandes
 
 
-def set_machines_demandees(normal=None, court=None):
+def set_machines_demandees(normal=None, court=None, vaisselle=None):
     """Enregistre le nombre de cycles voulus ; ``None`` laisse la valeur en place.
 
     Lève ``ValueError`` si une valeur n'est pas un entier lisible : appelée
     depuis un scénario, une saisie fantaisiste doit arrêter l'action avec un
     message clair plutôt que de passer pour un zéro.
     """
-    for type_cycle, valeur in (("normal", normal), ("court", court)):
+    for type_cycle, valeur in (("normal", normal), ("court", court), ("vaisselle", vaisselle)):
         if valeur is None or str(valeur).strip() == "":
             continue
         try:

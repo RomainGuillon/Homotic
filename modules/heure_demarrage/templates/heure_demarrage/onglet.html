@@ -162,6 +162,11 @@
         <input type="number" class="form-control" style="width:8rem" id="machinesCourt"
                name="machines_court" min="0" max="{{ max_machines }}" value="{{ demandes.court }}">
       </div>
+      <div>
+        <label class="form-label" for="machinesVaisselle">Lave-vaisselle</label>
+        <input type="number" class="form-control" style="width:8rem" id="machinesVaisselle"
+               name="machines_vaisselle" min="0" max="{{ max_machines }}" value="{{ demandes.vaisselle }}">
+      </div>
       <button class="btn btn-primary">Calculer</button>
     </form>
     {% include "heure_demarrage/_switch_optimise.html" with suffixe="Onglet" %}
@@ -202,6 +207,7 @@
                     <br><span class="small">demain {{ c.debut|date:"H:i" }} — {{ c.fin|date:"H:i" }}</span>
                   {% elif c.debut %}{{ c.debut|date:"H:i" }} — {{ c.fin|date:"H:i" }}
                     {% if c.avec_ballon %}<br><span class="small text-secondary">avec le chauffe-eau</span>{% endif %}
+                    {% if c.ensemble %}<br><span class="small text-secondary">avec le {{ c.ensemble|lower }}</span>{% endif %}
                   {% else %}<span class="text-secondary">plus de créneau</span>
                     {% if c.raison %}<br><span class="small text-secondary">{{ c.raison }}</span>{% endif %}
                   {% endif %}</td>
@@ -260,7 +266,8 @@
     <p class="text-secondary small mb-3">Ce que consomme un cycle, relevé sur une prise
       connectée. La <strong>chauffe</strong> de l'eau, en début de cycle, tire la
       résistance à pleine puissance par salves : le solaire ne la couvre que s'il
-      dépasse cette puissance. Le reste du cycle consomme peu.</p>
+      dépasse cette puissance. Le reste du cycle consomme peu. Le lave-vaisselle chauffe
+      plusieurs fois au cours du cycle : il se décrit phase par phase.</p>
     <form method="post">
       {% csrf_token %}
       <input type="hidden" name="action" value="machines_params">
@@ -290,8 +297,25 @@
         </div>
       {% endfor %}
       <div class="row g-3 mb-3">
-        <div class="col-6 col-md-2 offset-md-2">
+        <div class="col-12 col-md-2 d-flex align-items-center"><strong>Lave-vaisselle</strong></div>
+        <div class="col-12 col-md-6">
+          <label class="form-label">Phases du cycle</label>
+          <input type="text" name="machine_vaisselle_phases" class="form-control"
+                 value="{{ vaisselle.phases_texte }}">
+          <div class="form-text">« minutes:kWh » par phase, « :chauffe » quand la résistance
+            chauffe, séparées par « ; » — {{ vaisselle.duree_min }} min,
+            {{ vaisselle.kwh|floatformat:2 }} kWh dont {{ vaisselle.chauffe_kwh|floatformat:2 }} kWh de chauffe</div>
+        </div>
+        <div class="col-6 col-md-2">
           <label class="form-label">Résistance</label>
+          <input type="text" name="machine_vaisselle_pointe_kw" class="form-control"
+                 value="{{ vaisselle.pointe_kw|stringformat:'.2f' }}">
+          <div class="form-text">kW tirés pendant la chauffe</div>
+        </div>
+      </div>
+      <div class="row g-3 mb-3">
+        <div class="col-6 col-md-2 offset-md-2">
+          <label class="form-label">Résistance lave-linge</label>
           <input type="text" name="machine_pointe_kw" class="form-control" value="{{ machine.pointe_kw }}">
           <div class="form-text">kW tirés pendant la chauffe</div>
         </div>
