@@ -53,3 +53,83 @@ class PrevisionParJournee(SimpleTestCase):
         noms = {e["nom"]: e for e in info.INFOS}
         for nom in ("prevision_pv", "prevision_pv_demain"):
             self.assertEqual((noms[nom]["type"], noms[nom]["unite"]), ("serie", "kW"))
+
+
+class _Reponse:
+    """Réponse ``requests`` minimale : code HTTP et corps JSON."""
+
+    def __init__(self, code, corps=None):
+        self.status_code = code
+        self._corps = corps or {}
+        self.text = ""
+
+    def json(self):
+        return self._corps
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import requests
+
+            raise requests.HTTPError(response=self)
+
+
+def _r429(message):
+    return _Reponse(429, {"response_status": {"error_code": "TooManyRequests", "message": message}})
+
+
+class Erreurs429(SimpleTestCase):
+    """Un 429 « serveurs saturés » ne doit pas couper Solcast jusqu'au lendemain.
+
+    Le 13/10/2026, un 429 reçu à 11h après 4 appels sur 10 a bloqué les
+    appels jusqu'au 14/10 6h, ce qui faisait aussi sauter le passage de 3h.
+    """
+
+    def setUp(self):
+        self.reglages = {}
+        patches = [
+            mock.patch.object(api, "get_setting",
+                              side_effect=lambda k, module=None, default=None: self.reglages.get(k, default)),
+            mock.patch.object(api, "set_setting",
+                              side_effect=lambda k, v, module=None: self.reglages.__setitem__(k, v)),
+            mock.patch.object(api, "journal"),
+            mock.patch.object(api, "api_key", return_value="cle"),
+            mock.patch.object(api.time_mod, "sleep"),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        api._ctx.ok = True
+        self.addCleanup(setattr, api._ctx, "ok", False)
+
+    def _appeler(self, *reponses):
+        with mock.patch.object(api.requests, "get", side_effect=list(reponses)) as get:
+            try:
+                resultat = api._get("site", "forecasts")
+            except Exception as exc:
+                resultat = exc
+        return resultat, get.call_count
+
+    def test_quota_epuise_bloque_jusqu_a_minuit_utc(self):
+        resultat, appels = self._appeler(_r429("You have exceeded your free daily limit."))
+        self.assertIsInstance(resultat, Exception)
+        self.assertEqual(appels, 1)  # pas de nouvelle tentative
+        self.assertTrue(api.compteur_sature())
+        bo = api.backoff()
+        self.assertEqual(bo["jusqua"], api._remise_a_zero_quota())
+        self.assertLess(bo["jusqua"] - datetime.now(), timedelta(hours=24))
+
+    def test_sature_puis_succes(self):
+        resultat, appels = self._appeler(_r429("Too busy"), _Reponse(200, {"forecasts": []}))
+        self.assertEqual(resultat, {"forecasts": []})
+        self.assertEqual(appels, 2)
+        self.assertEqual(api.appels_du_jour(), 1)  # le refus n'est pas décompté
+        self.assertIsNone(api.backoff())
+
+    def test_sature_jusqu_au_bout_pause_courte(self):
+        resultat, appels = self._appeler(_r429(""), _r429(""), _r429(""))
+        self.assertIsInstance(resultat, Exception)
+        self.assertEqual(appels, 3)
+        self.assertEqual(api.appels_du_jour(), 0)
+        self.assertFalse(api.compteur_sature())
+        self.assertLessEqual(api.backoff()["jusqua"] - datetime.now(),
+                             timedelta(seconds=api.BACKOFF_OCCUPE_S))

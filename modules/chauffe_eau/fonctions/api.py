@@ -24,7 +24,9 @@ statut en base avec repli sur la dernière valeur connue.
 
 Reste un défaut connu : chaque relevé ouvre une session et se
 réauthentifie. Overkiz tolère mal les connexions répétées — c'est le
-prochain chantier (session persistante), pas encore traité ici.
+prochain chantier (session persistante), pas encore traité ici. En
+attendant, les commandes (``_lancer``) retentent après un refus de
+connexion au lieu d'abandonner.
 """
 
 import ast
@@ -530,20 +532,64 @@ async def _execute(user, pwd, commands, label, device_url=None):
         return device_url, decouvert
 
 
+# Attentes avant chaque nouvelle tentative d'une commande (secondes). Le
+# 13/10/2026, « chauffer » a reçu un 401 de Cozytouch à 12:30:31 alors que
+# les relevés de 12:29:38 et 12:30:38 passaient : un refus ponctuel du
+# serveur d'authentification. La nouvelle tentative immédiate a pris le même
+# refus dans la même seconde, et la chauffe du jour a été perdue.
+ATTENTES_COMMANDE_S = (15, 45)
+
+
+def _erreur_authentification(exc):
+    """Vrai si l'échec vient de la connexion (401, identifiants, trop d'appels).
+
+    Dans ce cas l'URL mémorisée n'y est pour rien : on la garde, et on
+    attend avant de retenter. pyoverkiz change ses classes d'exception d'une
+    version à l'autre, d'où un test sur le nom et le message.
+    """
+    texte = f"{type(exc).__name__} {exc}".lower()
+    return any(m in texte for m in (
+        "login failed", "401", "credential", "notauthenticated",
+        "not authenticated", "toomany", "too many",
+    ))
+
+
 def _lancer(commands, label):
-    """Envoie des commandes au ballon, en réutilisant l'URL mémorisée."""
+    """Envoie des commandes au ballon, en réutilisant l'URL mémorisée.
+
+    Jusqu'à trois tentatives. Les commandes envoyées ici règlent une
+    consigne (nombre de douches, mode boost) : les rejouer donne le même
+    résultat, un doublon éventuel est donc sans conséquence.
+
+    - échec de connexion (401…) : on attend 15 s puis 45 s, même URL ;
+    - autre échec avec une URL mémorisée : elle ne répond peut-être plus,
+      on retente en redécouvrant l'appareil.
+    """
     user, pwd = _require_credentials()
     url, libelle = _appareil_memorise()
-    try:
-        url, decouvert = asyncio.run(_execute(user, pwd, commands, label, url))
-    except Exception:
-        if not url:
-            raise
-        # L'URL mémorisée ne répond plus : une seule nouvelle tentative, en
-        # redécouvrant l'appareil. Les commandes envoyées ici règlent une
-        # consigne (nombre de douches, mode boost) : les rejouer donne le
-        # même résultat, un doublon éventuel est donc sans conséquence.
-        url, decouvert = asyncio.run(_execute(user, pwd, commands, label, None))
+    attentes = list(ATTENTES_COMMANDE_S)
+    erreurs = []
+    while True:
+        try:
+            url, decouvert = asyncio.run(_execute(user, pwd, commands, label, url))
+            break
+        except Exception as exc:
+            erreurs.append(exc)
+            auth = _erreur_authentification(exc)
+            if not attentes or (not auth and not url):
+                raise
+            if auth:
+                time_mod.sleep(attentes.pop(0))
+            else:
+                url = None  # redécouverte immédiate, une seule fois
+                attentes = attentes[:1]
+    if erreurs:
+        journal(
+            f"Commande « {label} » passée à la tentative {len(erreurs) + 1} "
+            f"(échec précédent : {erreurs[-1]})",
+            module=MODULE,
+            level=LogEntry.WARNING,
+        )
     _memoriser_appareil(url, decouvert or libelle)
 
 

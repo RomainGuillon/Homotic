@@ -19,8 +19,11 @@ site** à chaque requête (2 sites ici → 2 appels par rafraîchissement, donc
   sont celles des TACHES du ``conf.py``, donc connues d'avance ;
 - **compteur d'appels du jour** plafonné (réglage ``quota_jour``, 10 par
   défaut) : au-delà, plus aucun appel jusqu'au lendemain ;
-- **backoff après erreur** : une erreur réseau bloque les appels 30 min, un
-  429 (quota épuisé) les bloque jusqu'au lendemain 6h ;
+- **backoff après erreur** : une erreur réseau bloque les appels 30 min.
+  Un 429 a deux sens chez Solcast : « quota du jour épuisé » (message qui
+  parle de *limit*) bloque jusqu'à la remise à zéro Solcast, minuit UTC ;
+  « serveurs saturés » (tout autre 429, fréquent aux heures rondes) est
+  retenté deux fois puis bloque 15 min seulement, sans toucher au compteur ;
 - TTL 4 h sur les prévisions, 24 h sur l'estimation passée, et repli sur le
   cache périmé en cas d'erreur.
 
@@ -55,6 +58,8 @@ HISTORY_MAX_AGE_S = 36 * 3600
 
 QUOTA_JOUR_DEFAUT = 10  # appels/jour du plan gratuit Solcast
 BACKOFF_ERREUR_S = 30 * 60  # pause après une erreur réseau/serveur
+BACKOFF_OCCUPE_S = 15 * 60  # pause après un 429 « serveurs saturés »
+ATTENTES_OCCUPE_S = (20, 40)  # nouvelles tentatives après un 429 « saturé »
 
 
 class AppelRefuse(RuntimeError):
@@ -145,10 +150,19 @@ def quota_jour():
         return QUOTA_JOUR_DEFAUT
 
 
+def _jour_solcast():
+    """Jour du quota Solcast (ISO) : il change à minuit UTC, pas à minuit local.
+
+    Avec ``date.today()``, entre minuit et 2h (heure d'été) le compteur
+    repartait à zéro alors que Solcast comptait encore la veille.
+    """
+    return datetime.now(timezone.utc).date().isoformat()
+
+
 def _compteur_lire():
     """Retourne (jour ISO, nombre d'appels) du compteur, remis à zéro chaque jour."""
     raw = get_setting("appels_jour", module=MODULE)
-    aujourdhui = str(date.today())
+    aujourdhui = _jour_solcast()
     if not raw:
         return aujourdhui, 0
     try:
@@ -176,13 +190,14 @@ def compteur_sature():
         payload = json.loads(raw)
     except (ValueError, TypeError):
         return False
-    return payload.get("jour") == str(date.today()) and bool(payload.get("sature"))
+    return payload.get("jour") == _jour_solcast() and bool(payload.get("sature"))
 
 
-def _compteur_incrementer():
+def _compteur_incrementer(delta=1):
     jour, n = _compteur_lire()
-    set_setting("appels_jour", json.dumps({"jour": jour, "n": n + 1}), module=MODULE)
-    return n + 1
+    n = max(0, n + delta)
+    set_setting("appels_jour", json.dumps({"jour": jour, "n": n}), module=MODULE)
+    return n
 
 
 def _compteur_saturer():
@@ -201,9 +216,38 @@ def _compteur_saturer():
     )
 
 
-def _demain_6h():
-    d = datetime.now() + timedelta(days=1)
-    return d.replace(hour=DAY_START_HOUR, minute=0, second=0, microsecond=0)
+def _remise_a_zero_quota():
+    """Prochaine remise à zéro du quota Solcast (minuit UTC), en heure locale naïve.
+
+    Remplace l'ancien « demain 6h », qui faisait sauter le passage de 3h —
+    celui qui alimente le calcul de l'heure de démarrage du chauffe-eau.
+    Une minute de marge pour ne pas tomber pile sur la bascule.
+    """
+    maintenant = datetime.now(timezone.utc)
+    minuit = (maintenant + timedelta(days=1)).replace(
+        hour=0, minute=1, second=0, microsecond=0
+    )
+    return minuit.astimezone().replace(tzinfo=None)
+
+
+def _message_erreur(response):
+    """Message d'erreur renvoyé par Solcast (``response_status.message``), ou ''."""
+    try:
+        return str(response.json().get("response_status", {}).get("message", "")).strip()
+    except Exception:
+        return (getattr(response, "text", "") or "")[:200].strip()
+
+
+def _est_quota_epuise(message):
+    """Vrai si le 429 signifie « quota du jour épuisé ».
+
+    Solcast renvoie aussi 429 quand ses serveurs sont saturés (comptes
+    gratuits, surtout aux heures rondes). Seul le message permet de les
+    distinguer : le quota parle de « limit » (« You have exceeded your free
+    daily limit »). Dans le doute, on suppose « saturé » : au pire on
+    retente au passage suivant et on reçoit le vrai message de quota.
+    """
+    return "limit" in message.lower()
 
 
 def _poser_backoff(jusqua, raison):
@@ -315,31 +359,49 @@ def _autoriser_appel(nb=1):
 def _get(resource_id, endpoint):
     _autoriser_appel()
     url = f"{BASE_URL}/rooftop_sites/{resource_id}/{endpoint}?format=json"
-    _compteur_incrementer()  # compté même en cas d'échec : l'appel est parti
-    try:
-        r = requests.get(url, headers={"Authorization": f"Bearer {api_key()}"}, timeout=20)
-        r.raise_for_status()
-    except requests.HTTPError as exc:
-        code = getattr(exc.response, "status_code", None)
-        if code == 429:
-            # Quota épuisé côté Solcast : inutile de réessayer aujourd'hui.
-            # Le compteur est aligné sur cette vérité, sinon l'onglet
-            # afficherait des appels restants alors qu'il n'y en a plus.
-            _compteur_saturer()
-            _poser_backoff(_demain_6h(), "quota Solcast épuisé (429)")
-        else:
+    attentes = list(ATTENTES_OCCUPE_S)
+    while True:
+        _compteur_incrementer()  # compté même en cas d'échec : l'appel est parti
+        try:
+            r = requests.get(url, headers={"Authorization": f"Bearer {api_key()}"}, timeout=20)
+            r.raise_for_status()
+            return r.json()
+        except requests.HTTPError as exc:
+            code = getattr(exc.response, "status_code", None)
+            if code != 429:
+                _poser_backoff(
+                    datetime.now() + timedelta(seconds=BACKOFF_ERREUR_S),
+                    f"erreur HTTP {code}",
+                )
+                raise
+            message = _message_erreur(exc.response)
+            if _est_quota_epuise(message):
+                # Quota épuisé côté Solcast : inutile de réessayer avant la
+                # remise à zéro. Le compteur est aligné sur cette vérité,
+                # sinon l'onglet afficherait des appels restants.
+                _compteur_saturer()
+                _poser_backoff(
+                    _remise_a_zero_quota(),
+                    f"quota Solcast épuisé (429 : {message or 'sans message'})",
+                )
+                raise
+            # Serveurs saturés : la requête a été refusée, pas servie. On ne
+            # la décompte pas (sinon un passage malchanceux grignote le
+            # quota local), et on retente un peu plus tard.
+            _compteur_incrementer(-1)
+            if not attentes:
+                _poser_backoff(
+                    datetime.now() + timedelta(seconds=BACKOFF_OCCUPE_S),
+                    f"Solcast saturé (429 : {message or 'sans message'})",
+                )
+                raise
+            time_mod.sleep(attentes.pop(0))
+        except requests.RequestException as exc:
             _poser_backoff(
                 datetime.now() + timedelta(seconds=BACKOFF_ERREUR_S),
-                f"erreur HTTP {code}",
+                f"erreur réseau ({type(exc).__name__})",
             )
-        raise
-    except requests.RequestException as exc:
-        _poser_backoff(
-            datetime.now() + timedelta(seconds=BACKOFF_ERREUR_S),
-            f"erreur réseau ({type(exc).__name__})",
-        )
-        raise
-    return r.json()
+            raise
 
 
 # ----------------------------------------------------------------------

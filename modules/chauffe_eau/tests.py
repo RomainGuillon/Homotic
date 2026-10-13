@@ -1004,3 +1004,63 @@ class OngletDuSuivi(TestCase):
         self.assertEqual(page.context["suivi"]["bilan"]["verdict"], "trop_haute")
         self.assertContains(page, "trop haute")
         self.assertContains(page, "<strong>Heure démarrage</strong>")
+
+
+class CommandeApresRefusDeConnexion(SimpleTestCase):
+    """Un 401 ponctuel de Cozytouch ne doit plus faire perdre la chauffe.
+
+    Le 13/10/2026 à 12:30:31, « chauffer » a pris deux 401 dans la même
+    seconde (tentative + nouvelle tentative immédiate) et la chauffe solaire
+    du jour n'a pas eu lieu.
+    """
+
+    def setUp(self):
+        for cible, kw in (
+            ("_require_credentials", {"return_value": ("u", "p")}),
+            ("_appareil_memorise", {"return_value": ("url-memo", "Chauffe eau")}),
+            ("_memoriser_appareil", {}),
+            ("journal", {}),
+            ("_execute", {"new_callable": mock.MagicMock}),  # pas de coroutine orpheline
+        ):
+            p = mock.patch.object(api, cible, **kw)
+            setattr(self, cible.strip("_"), p.start())
+            self.addCleanup(p.stop)
+        p = mock.patch.object(api.time_mod, "sleep")
+        self.sleep = p.start()
+        self.addCleanup(p.stop)
+
+    def _lancer(self, *resultats):
+        with mock.patch.object(api.asyncio, "run", side_effect=list(resultats)) as run:
+            try:
+                api._lancer([("setExpectedNumberOfShower", [5])], "chauffer")
+                erreur = None
+            except Exception as exc:
+                erreur = exc
+        return erreur, run.call_count
+
+    def test_401_puis_succes_apres_attente(self):
+        erreur, appels = self._lancer(
+            RuntimeError("Login failed for Atlantic Cozytouch: 401"), ("url-memo", None),
+        )
+        self.assertIsNone(erreur)
+        self.assertEqual(appels, 2)
+        self.sleep.assert_called_once_with(api.ATTENTES_COMMANDE_S[0])
+        # même URL : le refus de connexion ne dit rien de l'appareil
+        self.assertEqual(self.execute.call_args_list[1].args[4], "url-memo")
+        self.journal.assert_called_once()  # la reprise laisse une trace
+
+    def test_401_persistant_abandonne_apres_trois_essais(self):
+        refus = RuntimeError("Login failed for Atlantic Cozytouch: 401")
+        erreur, appels = self._lancer(refus, refus, refus)
+        self.assertIs(erreur, refus)
+        self.assertEqual(appels, 3)
+        self.assertEqual([c.args[0] for c in self.sleep.call_args_list],
+                         list(api.ATTENTES_COMMANDE_S))
+
+    def test_url_qui_ne_repond_plus_redecouverte_sans_attente(self):
+        erreur, appels = self._lancer(KeyError("device"), ("url-neuve", "Chauffe eau"))
+        self.assertIsNone(erreur)
+        self.assertEqual(appels, 2)
+        self.sleep.assert_not_called()
+        self.assertIsNone(self.execute.call_args_list[1].args[4])
+        self.memoriser_appareil.assert_called_once_with("url-neuve", "Chauffe eau")
