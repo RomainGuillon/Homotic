@@ -1662,9 +1662,9 @@ class PagesDuModule(TestCase):
 
         with Horloge(7):
             page = self.client.get("/")
-        self.assertContains(page, "Cycles normaux")
+        self.assertContains(page, "Lave-linge normal")
         self.assertContains(page, "08:00")
-        self.assertContains(page, "Cycle normal")
+        self.assertContains(page, "Lave-linge, cycle normal")
         self.assertFalse(LogEntry.objects.filter(level=LogEntry.ERROR).exists())
 
     # --- Switch « Optimisé » ---
@@ -1777,6 +1777,15 @@ class PagesDuModule(TestCase):
         self.assertContains(onglet, "Aucune machine prévue aujourd'hui")
         self.assertFalse(LogEntry.objects.filter(level=LogEntry.ERROR).exists())
 
+    def test_les_nombres_sont_toujours_a_zero_a_l_affichage(self):
+        """Même avec une demande restée en base (ancienne version)."""
+        api.set_machines_demandees(normal=1, court=2, vaisselle=1)
+        bloc = self._bloc_machines()
+        onglet = self.client.get(self.URL).content.decode()
+        for nom in ("machines_normal", "machines_court", "machines_vaisselle"):
+            for page in (bloc, onglet):
+                self.assertRegex(page, rf'name="{nom}"[^>]*value="0"')
+
     def test_le_bloc_a_une_partie_lave_vaisselle(self):
         self._poster(action="machines", machines_normal="1", machines_vaisselle="1")
         with Horloge(7):
@@ -1868,3 +1877,141 @@ class PagesDuModule(TestCase):
         self.assertContains(
             self.client.get("/"), "moins de 10 ct d'écart : journée gardée"
         )
+
+
+class JustificationDuRecalcul(TestCase):
+    """Un recalcul doit dire pourquoi l'heure a bougé, ou pourquoi elle tient.
+
+    Trois recalculs par jour déplacent l'heure de chauffe sans que personne
+    regarde. Un résultat qui ne se relit pas, on le subit : ces tests fixent
+    ce que la comparaison doit savoir nommer.
+    """
+
+    POINTS = ChauffeEauInchange.POINTS
+    BLEU = (0.1609, 0.1296, "BLUE")
+
+    def setUp(self):
+        set_setting("conso_chauffe_eau", "2.40", module=api.MODULE)
+        set_setting("optimiser", "oui", module=api.MODULE)
+
+    def _calculer(self, points=None, arbitrage="nuit"):
+        courbe = self.POINTS if points is None else points
+        with mock.patch.object(calcul, "_forecast_points", return_value=(courbe, "")), \
+                mock.patch.object(calcul, "_tarifs", return_value=self.BLEU):
+            return calcul.calculer(arbitrage=arbitrage)
+
+    def test_premier_calcul_de_la_journee(self):
+        comparaison = self._calculer()["comparaison"]
+        self.assertFalse(comparaison["disponible"])
+        self.assertEqual(comparaison["phrase"], "Premier calcul de la journée.")
+
+    def test_heure_inchangee_sur_les_memes_donnees(self):
+        premier = self._calculer()
+        comparaison = self._calculer()["comparaison"]
+        self.assertTrue(comparaison["disponible"])
+        self.assertFalse(comparaison["change"])
+        self.assertEqual(comparaison["heure_avant"], premier["heure"])
+        self.assertIn("mêmes données, même créneau retenu", comparaison["phrase"])
+
+    def test_heure_deplacee_dit_ce_qui_a_bouge(self):
+        premier = self._calculer()
+        self.assertEqual(premier["mode"], "solaire")
+        plat = [(t, 0.2) for t, _kw in self.POINTS]  # plus le moindre surplus
+        second = self._calculer(points=plat)
+        comparaison = second["comparaison"]
+        self.assertTrue(comparaison["change"])
+        self.assertEqual(comparaison["heure_avant"], premier["heure"])
+        self.assertEqual(comparaison["heure_apres"], second["heure"])
+        self.assertIn("plus aucun créneau exploitable", comparaison["phrase"])
+
+    def test_besoin_du_ballon_signale_meme_sans_changer_l_heure(self):
+        premier = self._calculer()
+        set_setting("conso_chauffe_eau", "2.60", module=api.MODULE)
+        second = self._calculer()
+        comparaison = second["comparaison"]
+        self.assertEqual(second["heure"], premier["heure"])
+        self.assertFalse(comparaison["change"])
+        self.assertIn("besoin du ballon 2.40 → 2.60 kWh", comparaison["phrase"])
+        self.assertIn("sans changer le créneau retenu", comparaison["phrase"])
+
+    def test_mode_jour_sans_prevision_conserve_l_heure_precedente(self):
+        premier = self._calculer()
+        second = self._calculer(points=[], arbitrage="jour")
+        comparaison = second["comparaison"]
+        self.assertIsNone(second["heure"])
+        self.assertTrue(comparaison["conserve"])
+        self.assertEqual(comparaison["heure_apres"], premier["heure"])
+        self.assertIn(f"Heure de {premier['heure']} conservée", comparaison["phrase"])
+
+    def test_passage_en_arbitrage_jour_est_nomme(self):
+        self._calculer()
+        comparaison = self._calculer(arbitrage="jour")["comparaison"]
+        self.assertIn(
+            "les heures creuses ne sont plus accessibles", comparaison["phrase"]
+        )
+
+    def test_la_phrase_figure_dans_le_detail_du_journal(self):
+        self._calculer()
+        second = self._calculer()
+        self.assertTrue(
+            any(ligne.startswith("RECALCUL :") for ligne in second["detail"])
+        )
+
+    def test_un_calcul_de_la_veille_ne_sert_pas_de_reference(self):
+        """Comparer à hier n'apprend rien : c'est un premier calcul."""
+        self._calculer()
+        hier = json.loads(get_setting(calcul.CLE_DERNIER, module=api.MODULE))
+        hier["quand"] = (datetime.now() - timedelta(days=1)).isoformat()
+        set_setting(calcul.CLE_DERNIER, json.dumps(hier), module=api.MODULE)
+        comparaison = self._calculer()["comparaison"]
+        self.assertFalse(comparaison["disponible"])
+        self.assertEqual(comparaison["phrase"], "Premier calcul de la journée.")
+
+
+class ArbitrageJourSansNuitAffichee(TestCase):
+    """En recalcul de journée, la nuit n'est plus une option : ne pas la montrer.
+
+    Le bloc comparait les deux coûts même quand les heures creuses étaient
+    passées, et attribuait l'absence de comparaison au réglage « optimiser ».
+    Deux causes très différentes sous un seul message, dont celui qui envoie
+    chercher un réglage qui va bien.
+    """
+
+    URL = "/module/heure_demarrage/"
+    POINTS = ChauffeEauInchange.POINTS
+    BLEU = (0.1609, 0.1296, "BLUE")
+
+    def setUp(self):
+        connecte(self.client)
+        Module.objects.create(
+            name="heure_demarrage", label="Heure démarrage", enabled=True
+        )
+        set_setting("conso_chauffe_eau", "2.40", module=api.MODULE)
+        set_setting("optimiser", "oui", module=api.MODULE)
+
+    def _calculer(self, arbitrage):
+        with mock.patch.object(calcul, "_forecast_points", return_value=(self.POINTS, "")), \
+                mock.patch.object(calcul, "_tarifs", return_value=self.BLEU):
+            return calcul.calculer(arbitrage=arbitrage)
+
+    def test_arbitrage_nuit_compare_toujours_les_deux_couts(self):
+        self._calculer("nuit")
+        page = self.client.get(self.URL)
+        self.assertContains(page, "Comparaison des coûts")
+        self.assertContains(page, "Nuit (heures creuses)")
+
+    def test_arbitrage_jour_ne_presente_plus_la_nuit(self):
+        self._calculer("jour")
+        page = self.client.get(self.URL)
+        self.assertNotContains(page, "Nuit (heures creuses)")
+        self.assertNotContains(page, "Comparaison des coûts")
+        self.assertContains(page, "Coût de la chauffe retenue")
+        self.assertContains(page, "les heures creuses sont déjà passées")
+
+    def test_arbitrage_jour_n_accuse_pas_le_reglage_optimiser(self):
+        """« optimiser » est sur oui : lui imputer l'absence de comparaison est faux."""
+        self._calculer("jour")
+        self.assertTrue(api.optimiser())
+        page = self.client.get(self.URL)
+        self.assertNotContains(page, "la décision ignore ces coûts")
+        self.assertNotContains(self.client.get("/"), "sans arbitrage de coût")

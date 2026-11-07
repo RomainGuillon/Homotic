@@ -51,6 +51,12 @@
         {% elif r.jamais_calcule %}
           <div class="small text-warning mt-1">aucun calcul effectué — bouton « Recalculer »</div>
         {% endif %}
+        {% comment %} Pourquoi cette heure-là : ce qui a bougé, ou ce qui n'a pas
+           bougé, depuis le calcul précédent de la journée. {% endcomment %}
+        {% if r.comparaison.phrase %}
+          <div class="small mt-1 {% if r.comparaison.conserve %}text-warning{% else %}text-secondary{% endif %}">
+            {{ r.comparaison.phrase }}</div>
+        {% endif %}
       </div>
       <div class="col-6 col-md-4">
         <div class="fs-4 fw-bold">{{ r.duree_min }}<span class="fs-6"> min</span></div>
@@ -88,7 +94,32 @@
         surplus après talon maison <strong>{{ r.creneau.surplus_kwh|floatformat:1 }} kWh</strong>.</p>
     {% endif %}
 
-    {% if r.cout_nuit is not None %}
+    {% comment %} En arbitrage « jour », les heures creuses sont déjà passées :
+       les mettre en face du créneau solaire les présenterait comme une option
+       alors qu'elles n'en sont plus une, et l'écart affiché ferait croire à un
+       choix qui n'a pas eu lieu. Seul le coût de ce qui sera réellement acheté
+       a du sens ici. {% endcomment %}
+    {% if r.arbitrage == "jour" %}
+      {% if r.cout_jour is not None %}
+        <table class="table table-sm align-middle mb-0" style="max-width:680px">
+          <thead><tr><th>Coût de la chauffe retenue</th><th class="text-end">Détail</th><th class="text-end">Coût</th></tr></thead>
+          <tbody>
+            <tr class="table-active">
+              <td><strong>Journée (solaire)</strong>
+                {% if r.creneau %}<br><span class="small text-secondary">à {{ r.creneau.debut|date:"H:i" }}</span>{% endif %}</td>
+              <td class="text-end small text-secondary">
+                besoin {{ r.besoin_kwh|floatformat:2 }} − surplus {{ r.creneau.surplus_kwh|floatformat:2 }} kWh<br>
+                = {{ r.part_reseau_kwh|floatformat:2 }} kWh réseau × {{ r.prix_hp|floatformat:4 }} € (HP {{ r.couleur }})<br>
+                <span class="text-success">{{ r.part_solaire_kwh|floatformat:2 }} kWh solaire gratuits</span></td>
+              <td class="text-end"><strong>{{ r.cout_jour|floatformat:3 }} €</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      {% endif %}
+      <p class="small text-secondary mt-2 mb-0">Recalcul de la journée : les heures
+        creuses sont déjà passées, elles ne sont pas comparées. Le meilleur créneau
+        solaire restant est retenu.</p>
+    {% elif r.cout_nuit is not None %}
       <table class="table table-sm align-middle mb-0" style="max-width:680px">
         <thead><tr><th>Comparaison des coûts</th><th class="text-end">Détail</th><th class="text-end">Coût</th></tr></thead>
         <tbody>
@@ -118,7 +149,7 @@
       {% if r.gain is not None %}
         <p class="small text-secondary mt-2 mb-0">Écart : <strong>{{ r.gain|floatformat:3 }} €</strong> en faveur de
           {% if r.cout_jour <= r.cout_nuit %}la journée solaire{% else %}la nuit{% endif %}.
-          {% if not r.optimiser %}<span class="text-warning">Optimisation désactivée : la décision ignore ces coûts.</span>{% endif %}
+          {% if not r.optimiser %}<span class="text-warning">Réglage « optimiser » sur non : la décision ignore ces coûts.</span>{% endif %}
           {% if r.jour_garde %}<span class="text-warning">Moins de {{ r.seuil_nuit_cts|floatformat:"-2" }} ct d'écart : la chauffe reste en journée.</span>{% endif %}</p>
       {% endif %}
     {% endif %}

@@ -9,6 +9,10 @@
       {% if r.heure_forcee %}
         · <span class="text-warning">forcée à la main (calcul : {{ r.heure_calculee|default:"—" }})</span>
       {% endif %}</div>
+    {% if r.comparaison.phrase %}
+      <div class="small {% if r.comparaison.conserve %}text-warning{% else %}text-faint{% endif %}">
+        {{ r.comparaison.phrase }}</div>
+    {% endif %}
   </div>
   <div class="text-end">
     <div class="fw-bold">{{ r.duree_min }} <span class="small">min</span></div>
@@ -44,8 +48,11 @@
           <div class="text-secondary small">moins de {{ r.seuil_nuit_cts|floatformat:"-2" }} ct d'écart : journée gardée</div>
         {% endif %}
       {% else %}
-        <div class="fw-bold">{% if r.optimiser %}Optimisé{% else %}Solaire max{% endif %}</div>
-        <div class="text-secondary small">{% if not r.optimiser %}sans arbitrage de coût{% endif %}</div>
+        <div class="fw-bold">{% if r.optimiser %}Optimisé{% else %}Solaire{% endif %}
+          {% if r.ajustement == "max" %}<span class="small text-warning">· Max</span>{% endif %}</div>
+        <div class="text-secondary small">
+          {% if r.arbitrage == "jour" %}heures creuses passées, pas de comparaison
+          {% elif not r.optimiser %}sans arbitrage de coût{% endif %}</div>
       {% endif %}
     </div>
   </div>

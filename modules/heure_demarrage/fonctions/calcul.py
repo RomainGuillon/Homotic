@@ -410,6 +410,12 @@ def detail_texte(r):
         lignes.append(
             "DÉCISION : aucune heure retenue, la précédente est conservée."
         )
+
+    # Face au calcul précédent du jour : ce qui a bougé, ou ce qui n'a pas
+    # bougé. Sans cette ligne, un recalcul qui déplace l'heure ne se relit pas.
+    phrase = (r.get("comparaison") or {}).get("phrase")
+    if phrase:
+        lignes.append(f"RECALCUL : {phrase}")
     return lignes
 
 
@@ -454,6 +460,160 @@ def _deserialiser(valeur):
     return valeur
 
 
+def _precedent_calcul():
+    """Le calcul mémorisé tel qu'il a été calculé, sans l'heure forcée à la main.
+
+    ``dernier_resultat()`` fait primer la variable modifiable à la main : très
+    bien pour l'affichage, faux pour comparer deux calculs entre eux. On relit
+    donc la photo brute.
+    """
+    raw = get_setting(CLE_DERNIER, module=MODULE)
+    if not raw:
+        return None
+    try:
+        precedent = _deserialiser(json.loads(raw))
+    except (ValueError, TypeError):
+        return None
+    quand = precedent.get("quand")
+    if isinstance(quand, str):
+        try:
+            precedent["quand"] = datetime.fromisoformat(quand)
+        except ValueError:
+            precedent["quand"] = None
+    return precedent
+
+
+def _heure_creneau(creneau):
+    """« HH:MM » du début d'un créneau, ou None."""
+    if not creneau or not creneau.get("debut"):
+        return None
+    return creneau["debut"].astimezone().strftime("%H:%M")
+
+
+def _nombre(valeur):
+    try:
+        return float(valeur)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ecarts_entrees(avant, apres):
+    """Ce qui a bougé dans les données d'entrée entre deux calculs.
+
+    On rapporte des écarts constatés, jamais une cause : « la prévision a été
+    revue » se vérifie, « c'est à cause de la prévision » se devine. Les
+    micro-variations sont tues — un dixième de kWh de surplus n'explique rien
+    et noierait ce qui compte.
+    """
+    ecarts = []
+
+    if avant.get("arbitrage") != apres.get("arbitrage") and apres.get("arbitrage") == "jour":
+        ecarts.append("les heures creuses ne sont plus accessibles")
+
+    av_c, ap_c = avant.get("creneau"), apres.get("creneau")
+    if av_c and ap_c:
+        if _heure_creneau(av_c) != _heure_creneau(ap_c):
+            ecarts.append(
+                f"meilleur créneau {_heure_creneau(av_c)} → {_heure_creneau(ap_c)}"
+            )
+        av_s, ap_s = _nombre(av_c.get("surplus_kwh")), _nombre(ap_c.get("surplus_kwh"))
+        if av_s is not None and ap_s is not None and abs(ap_s - av_s) >= 0.05:
+            ecarts.append(f"surplus prévu {av_s:.2f} → {ap_s:.2f} kWh")
+    elif av_c and not ap_c:
+        ecarts.append("plus aucun créneau exploitable")
+    elif ap_c and not av_c:
+        ecarts.append("un créneau exploitable est réapparu")
+
+    av_b, ap_b = _nombre(avant.get("besoin_kwh")), _nombre(apres.get("besoin_kwh"))
+    if av_b is not None and ap_b is not None and abs(ap_b - av_b) >= 0.05:
+        ecarts.append(f"besoin du ballon {av_b:.2f} → {ap_b:.2f} kWh")
+
+    av_t = _nombre((avant.get("estimation") or {}).get("temperature"))
+    ap_t = _nombre((apres.get("estimation") or {}).get("temperature"))
+    if av_t is not None and ap_t is not None and abs(ap_t - av_t) >= 0.5:
+        ecarts.append(f"ballon à {av_t:.1f} → {ap_t:.1f} °C")
+
+    av_coul, ap_coul = avant.get("couleur"), apres.get("couleur")
+    if av_coul and ap_coul and av_coul != ap_coul:
+        ecarts.append(f"couleur du jour {av_coul} → {ap_coul}")
+
+    return ecarts
+
+
+def _comparer(precedent, resultat):
+    """Pourquoi l'heure a changé, ou pourquoi elle n'a pas bougé.
+
+    Un recalcul qui déplace l'heure sans rien dire n'est pas vérifiable : on
+    la subit au lieu de la lire. Cette comparaison existe pour qu'on puisse
+    faire confiance au calcul — ou le prendre en défaut.
+
+    Retourne ``{disponible, quand, heure_avant, heure_apres, change,
+    conserve, sens, ecarts, phrase}``. ``phrase`` est la ligne prête à
+    afficher ; le reste permet de la reconstruire autrement.
+    """
+    comparaison = {
+        "disponible": False,
+        "quand": None,
+        "heure_avant": None,
+        "heure_apres": resultat.get("heure"),
+        "change": False,
+        "conserve": False,
+        "sens": None,
+        "ecarts": [],
+        "phrase": "Premier calcul de la journée.",
+    }
+
+    quand = (precedent or {}).get("quand")
+    if not precedent or not isinstance(quand, datetime) or quand.date() != date.today():
+        return comparaison
+
+    avant = precedent.get("heure")
+    apres = resultat.get("heure")
+    comparaison.update({
+        "disponible": True,
+        "quand": quand,
+        "heure_avant": avant,
+        "ecarts": _ecarts_entrees(precedent, resultat),
+    })
+    ecarts = comparaison["ecarts"]
+    depuis = f"depuis le calcul de {quand:%H:%M}"
+
+    if apres is None:
+        # Aucune heure nouvelle : tache_actualiser garde la précédente plutôt
+        # que de laisser la variable vide. Il faut le dire, sinon l'écran
+        # montre une heure que plus aucun calcul ne soutient.
+        comparaison["conserve"] = True
+        comparaison["heure_apres"] = avant
+        motif = " ; ".join(ecarts) if ecarts else "aucun créneau exploitable"
+        if avant:
+            comparaison["phrase"] = (
+                f"Heure de {avant} conservée {depuis} : {motif}."
+            )
+        else:
+            comparaison["phrase"] = f"Aucune heure retenue : {motif}."
+    elif avant == apres:
+        if ecarts:
+            comparaison["phrase"] = (
+                f"Inchangé {depuis} — {' ; '.join(ecarts)}, "
+                f"sans changer le créneau retenu."
+            )
+        else:
+            comparaison["phrase"] = (
+                f"Inchangé {depuis} : mêmes données, même créneau retenu."
+            )
+    else:
+        comparaison["change"] = True
+        if avant:
+            comparaison["sens"] = "avancé" if apres < avant else "repoussé"
+            tete = f"{comparaison['sens'].capitalize()} de {avant} à {apres} {depuis}"
+        else:
+            tete = f"Heure retenue : {apres} — aucune n'avait été retenue à {quand:%H:%M}"
+        suite = f" — {' ; '.join(ecarts)}" if ecarts else ""
+        comparaison["phrase"] = f"{tete}{suite}."
+
+    return comparaison
+
+
 def memoriser(resultat):
     """Enregistre le résultat d'un calcul comme référence courante."""
     charge = _serialiser(dict(resultat))
@@ -477,6 +637,7 @@ def _resultat_vide(erreur):
     )
     vide.update({
         "jour_garde": False,
+        "comparaison": None,
         "detail": [], "erreur": erreur, "quand": None,
         "perime": False, "jamais_calcule": True,
         "arbitrage": "nuit", "ajustement": "faible",
@@ -559,6 +720,7 @@ def calculer(tracer=False, arbitrage="nuit"):
       renvoyer à une nuit déjà passée.
     """
     arbitrage = "jour" if str(arbitrage).lower() == "jour" else "nuit"
+    precedent = _precedent_calcul()
     duree_min, besoin, estimation = _duree_et_besoin()
     resultat = {
         "saison": api.saison(),
@@ -662,6 +824,8 @@ def calculer(tracer=False, arbitrage="nuit"):
         # La nuit coûtait un peu moins, mais pas assez pour quitter le soleil.
         resultat["jour_garde"] = resultat["cout_nuit"] < resultat["cout_jour"]
 
+    # Comparé au calcul précédent du jour, avant que celui-ci ne l'écrase.
+    resultat["comparaison"] = _comparer(precedent, resultat)
     return _finaliser(resultat, tracer)
 
 
