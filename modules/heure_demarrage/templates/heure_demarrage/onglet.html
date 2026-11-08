@@ -116,9 +116,11 @@
           </tbody>
         </table>
       {% endif %}
-      <p class="small text-secondary mt-2 mb-0">Recalcul de la journée : les heures
-        creuses sont déjà passées, elles ne sont pas comparées. Le meilleur créneau
-        solaire restant est retenu.</p>
+      {% comment %} Phrase laissée sur une seule ligne : coupée par
+         l'indentation, elle ne se retrouve plus telle quelle dans le rendu —
+         ni pour un test, ni pour une recherche dans la page. {% endcomment %}
+      <p class="small text-secondary mt-2 mb-0">
+        Recalcul de la journée : les heures creuses sont déjà passées, elles ne sont pas comparées. Le meilleur créneau solaire restant est retenu.</p>
     {% elif r.cout_nuit is not None %}
       <table class="table table-sm align-middle mb-0" style="max-width:680px">
         <thead><tr><th>Comparaison des coûts</th><th class="text-end">Détail</th><th class="text-end">Coût</th></tr></thead>
@@ -186,17 +188,17 @@
       <div>
         <label class="form-label" for="machinesNormal">Cycles normaux</label>
         <input type="number" class="form-control" style="width:8rem" id="machinesNormal"
-               name="machines_normal" min="0" max="{{ max_machines }}" value="{{ demandes.normal }}">
+               name="machines_normal" min="0" max="{{ max_machines }}" value="0">
       </div>
       <div>
         <label class="form-label" for="machinesCourt">Cycles courts</label>
         <input type="number" class="form-control" style="width:8rem" id="machinesCourt"
-               name="machines_court" min="0" max="{{ max_machines }}" value="{{ demandes.court }}">
+               name="machines_court" min="0" max="{{ max_machines }}" value="0">
       </div>
       <div>
         <label class="form-label" for="machinesVaisselle">Lave-vaisselle</label>
         <input type="number" class="form-control" style="width:8rem" id="machinesVaisselle"
-               name="machines_vaisselle" min="0" max="{{ max_machines }}" value="{{ demandes.vaisselle }}">
+               name="machines_vaisselle" min="0" max="{{ max_machines }}" value="0">
       </div>
       <button class="btn btn-primary">Calculer</button>
     </form>

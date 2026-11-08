@@ -197,6 +197,22 @@ def _appareil(profil):
     return profil.get("appareil") or "Lave-linge"
 
 
+def _nom_affiche(profil):
+    """Nom du cycle tel qu'il se lit au tableau de bord : « Lave-linge normal ».
+
+    Le bloc ne met un en-tête d'appareil que lorsqu'il y en a plusieurs ;
+    avec un seul, la ligne doit dire d'elle-même de quelle machine il s'agit.
+    Le libellé du profil (« Cycle normal ») ne le dit pas, et l'appareil seul
+    ne distingue pas deux cycles du lave-linge : on garde donc l'appareil et
+    ce qui qualifie le cycle. Quand le libellé n'ajoute rien à l'appareil —
+    le lave-vaisselle n'a qu'un cycle — l'appareil suffit.
+    """
+    appareil = _appareil(profil)
+    libelle = str(profil.get("libelle") or "")
+    qualificatif = libelle[len("Cycle "):].strip() if libelle.startswith("Cycle ") else ""
+    return f"{appareil} {qualificatif}" if qualificatif else appareil
+
+
 def _phases(profil):
     """Phases d'un cycle : ``[(minutes, kWh, chauffe)]``.
 
@@ -657,6 +673,7 @@ def _cycle(profil, tarifs, debut, bilan, comparer_hc=True):
         "type": profil["type"],
         "libelle": profil["libelle"],
         "appareil": _appareil(profil),
+        "nom_affiche": _nom_affiche(profil),
         "duree_min": profil["duree_min"],
         "kwh": kwh,
         "debut": debut,

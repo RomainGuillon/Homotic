@@ -9,19 +9,19 @@
     <label class="form-label small text-secondary mb-1" for="blocMachinesNormal">Cycles normaux</label>
     <input type="number" class="form-control form-control-sm" style="width:6rem"
            id="blocMachinesNormal" name="machines_normal"
-           min="0" max="{{ max_machines }}" value="{{ demandes.normal }}">
+           min="0" max="{{ max_machines }}" value="0">
   </div>
   <div>
     <label class="form-label small text-secondary mb-1" for="blocMachinesCourt">Cycles courts</label>
     <input type="number" class="form-control form-control-sm" style="width:6rem"
            id="blocMachinesCourt" name="machines_court"
-           min="0" max="{{ max_machines }}" value="{{ demandes.court }}">
+           min="0" max="{{ max_machines }}" value="0">
   </div>
   <div>
     <label class="form-label small text-secondary mb-1" for="blocMachinesVaisselle">Lave-vaisselle</label>
     <input type="number" class="form-control form-control-sm" style="width:6rem"
            id="blocMachinesVaisselle" name="machines_vaisselle"
-           min="0" max="{{ max_machines }}" value="{{ demandes.vaisselle }}">
+           min="0" max="{{ max_machines }}" value="0">
   </div>
   <button class="btn btn-sm btn-primary">Calculer</button>
 </form>
@@ -51,7 +51,7 @@
         <span class="fs-4 fw-bold lh-1"
               style="color:{% if c.conseil == 'jour' %}#f59e0b{% elif c.conseil == 'demain' %}#c4b5fd{% else %}#93c5fd{% endif %}">
           {{ c.heure|default:"—" }}</span>
-        <span class="ms-2">{{ c.libelle }}</span>
+        <span class="ms-2" title="{{ c.appareil }}, {{ c.libelle|lower }}">{{ c.nom_affiche|default:c.libelle }}</span>
         <div class="small text-secondary">
           {% if c.conseil == "hc" %}
             heures creuses, à partir de {{ c.heure }}

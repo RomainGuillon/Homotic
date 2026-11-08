@@ -34,7 +34,6 @@ def blocs(request):
                 "heure_demarrage/_bloc_machines.html",
                 {
                     "p": machines.dernier_resultat(),
-                    "demandes": api.machines_demandees(),
                     "max_machines": api.MAX_MACHINES,
                     "optimise": api.machines_optimise(),
                 },

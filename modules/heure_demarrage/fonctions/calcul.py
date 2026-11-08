@@ -400,6 +400,13 @@ def detail_texte(r):
     if r.get("erreur"):
         lignes.append(f"Remarque : {r['erreur']}.")
 
+    # Face au calcul précédent du jour : ce qui a bougé, ou ce qui n'a pas
+    # bougé. Sans cette ligne, un recalcul qui déplace l'heure ne se relit pas.
+    # Elle précède la décision, qui reste le dernier mot du détail.
+    phrase = (r.get("comparaison") or {}).get("phrase")
+    if phrase:
+        lignes.append(f"RECALCUL : {phrase}")
+
     if r.get("heure"):
         raison = {
             "nuit": "chauffe en heures creuses",
@@ -410,12 +417,6 @@ def detail_texte(r):
         lignes.append(
             "DÉCISION : aucune heure retenue, la précédente est conservée."
         )
-
-    # Face au calcul précédent du jour : ce qui a bougé, ou ce qui n'a pas
-    # bougé. Sans cette ligne, un recalcul qui déplace l'heure ne se relit pas.
-    phrase = (r.get("comparaison") or {}).get("phrase")
-    if phrase:
-        lignes.append(f"RECALCUL : {phrase}")
     return lignes
 
 
