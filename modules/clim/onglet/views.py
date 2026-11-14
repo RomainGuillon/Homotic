@@ -32,6 +32,21 @@ def _save_params(request):
     messages.success(request, "Paramètres climatisation enregistrés.")
 
 
+def _reglages_allumage(request):
+    """Réglages choisis dans les listes d'une unité à l'arrêt, envoyés avec l'allumage."""
+    reglages = {}
+    temperature = request.POST.get("temperature", "")
+    if temperature.isdigit():
+        reglages["temperature"] = int(temperature)
+    if request.POST.get("mode") in dict(api.MODE_OPTIONS):
+        reglages["mode"] = request.POST["mode"]
+    if request.POST.get("fan_mode") in api.FAN_OPTIONS:
+        reglages["fan_mode"] = request.POST["fan_mode"]
+    if request.POST.get("swing") in api.SWING_OPTIONS:
+        reglages["swing"] = request.POST["swing"]
+    return reglages
+
+
 def onglet(request):
     if request.method == "POST":
         action = request.POST.get("action", "")
@@ -44,7 +59,10 @@ def onglet(request):
             elif action == "power":
                 room = request.POST.get("room", "")
                 on = request.POST.get("on") == "1"
-                api.set_unit(room, power="on" if on else "off")
+                if on:
+                    api.set_unit(room, power="on", **_reglages_allumage(request))
+                else:
+                    api.set_unit(room, power="off")
                 messages.success(request, f"Climatisation {'allumée' if on else 'éteinte'}.")
             elif action == "set":
                 room = request.POST.get("room", "")

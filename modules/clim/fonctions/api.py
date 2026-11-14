@@ -14,7 +14,6 @@ cache avec repli sur la dernière valeur connue.
 
 import asyncio
 import json
-import time as time_mod
 import unicodedata
 from datetime import datetime, timedelta
 
@@ -209,11 +208,7 @@ def set_unit(room, **kwargs):
     result = asyncio.run(_set_clim(user, pwd, unit["device_url"], **kwargs))
     detail = ", ".join(f"{k}={v}" for k, v in kwargs.items() if v is not None)
     journal(f"Clim « {unit['label']} » : {detail}", module=MODULE)
-    time_mod.sleep(2)
-    try:
-        get_units_cached(force=True)
-    except Exception:
-        pass
+    maj_cache_unite(room, kwargs)
     return result
 
 
@@ -247,6 +242,30 @@ def get_units_cached(force=False, ttl_minutes=10):
 
     set_setting("cache_units", json.dumps({"ts": now.isoformat(), "data": data}), module=MODULE)
     return data, now, ""
+
+
+def maj_cache_unite(room, valeurs):
+    """Reporte dans le cache les valeurs qui viennent d'être envoyées.
+
+    Le serveur Overkiz ne connaît le nouvel état qu'une fois que l'unité l'a
+    remonté : relu juste après l'envoi, il renvoie encore l'ancien, et
+    l'onglet affichait l'ancienne valeur. On garde l'horodatage du cache :
+    la prochaine lecture programmée remplace ces valeurs par l'état réel.
+    """
+    raw = get_setting("cache_units", module=MODULE)
+    if not raw:
+        return
+    try:
+        payload = json.loads(raw)
+        units = payload["data"]
+    except (ValueError, KeyError, TypeError):
+        return
+    for unit in units:
+        if unit.get("room") != room:
+            continue
+        unit.update({k: v for k, v in valeurs.items() if v is not None})
+        unit["on"] = unit.get("power") == "on"
+    set_setting("cache_units", json.dumps(payload), module=MODULE)
 
 
 def tache_actualiser():

@@ -48,7 +48,7 @@
               </div>
             </div>
 
-            <form method="post" class="mb-3">
+            <form method="post" class="mb-3" id="power-{{ u.room }}">
               {% csrf_token %}
               <input type="hidden" name="action" value="power">
               <input type="hidden" name="room" value="{{ u.room }}">
@@ -66,7 +66,11 @@
                   <input type="hidden" name="action" value="set">
                   <input type="hidden" name="room" value="{{ u.room }}">
                   <input type="hidden" name="field" value="temperature">
+                  {% if u.on %}
                   <select name="value" class="form-select form-select-sm" onchange="this.form.submit()">
+                  {% else %}
+                  <select name="temperature" class="form-select form-select-sm" form="power-{{ u.room }}">
+                  {% endif %}
                     {% for t in temperatures %}
                       <option value="{{ t }}" {% if t == u.temperature|floatformat:0|add:"0" %}selected{% endif %}>{{ t }} °C</option>
                     {% endfor %}
@@ -80,7 +84,11 @@
                   <input type="hidden" name="action" value="set">
                   <input type="hidden" name="room" value="{{ u.room }}">
                   <input type="hidden" name="field" value="mode">
+                  {% if u.on %}
                   <select name="value" class="form-select form-select-sm" onchange="this.form.submit()">
+                  {% else %}
+                  <select name="mode" class="form-select form-select-sm" form="power-{{ u.room }}">
+                  {% endif %}
                     {% for value, label in modes %}
                       <option value="{{ value }}" {% if value == u.mode %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
@@ -94,7 +102,11 @@
                   <input type="hidden" name="action" value="set">
                   <input type="hidden" name="room" value="{{ u.room }}">
                   <input type="hidden" name="field" value="fan_mode">
+                  {% if u.on %}
                   <select name="value" class="form-select form-select-sm" onchange="this.form.submit()">
+                  {% else %}
+                  <select name="fan_mode" class="form-select form-select-sm" form="power-{{ u.room }}">
+                  {% endif %}
                     {% for f in fans %}
                       <option value="{{ f }}" {% if f == u.fan_mode %}selected{% endif %}>{{ f }}</option>
                     {% endfor %}
@@ -108,7 +120,11 @@
                   <input type="hidden" name="action" value="set">
                   <input type="hidden" name="room" value="{{ u.room }}">
                   <input type="hidden" name="field" value="swing">
+                  {% if u.on %}
                   <select name="value" class="form-select form-select-sm" onchange="this.form.submit()">
+                  {% else %}
+                  <select name="swing" class="form-select form-select-sm" form="power-{{ u.room }}">
+                  {% endif %}
                     {% for s in swings %}
                       <option value="{{ s }}" {% if s == u.swing %}selected{% endif %}>{{ s }}</option>
                     {% endfor %}
