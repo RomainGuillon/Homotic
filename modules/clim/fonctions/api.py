@@ -47,6 +47,21 @@ TEMP_MIN, TEMP_MAX = 16, 32
 
 MODES_FR = dict(MODE_OPTIONS)
 
+# Abréviations renvoyées par le state de ventilation selon les unités
+FAN_STATE_TO_COMMAND = {"hi": "high", "med": "medium", "lo": "low"}
+
+
+def mode_state_to_command(value):
+    """Le state renvoie autoCooling/autoHeating, la commande attend auto."""
+    if isinstance(value, str) and value.startswith("auto"):
+        return "auto"
+    return value
+
+
+def fan_state_to_command(value):
+    """Le state peut renvoyer hi/med/lo, la commande attend high/medium/low."""
+    return FAN_STATE_TO_COMMAND.get(value, value)
+
 
 def swing_state_to_command(value):
     """Le state renvoie stop/swing, la commande attend une direction (v1)."""
@@ -124,6 +139,11 @@ def _extract_status(device):
     for key, overkiz_name in STATE_MAP.items():
         state = states.get(overkiz_name)
         status[key] = state.value if state is not None else None
+    # Valeurs ramenées à celles de la commande globalControl : ce sont elles
+    # qu'affichent les listes et qui sont renvoyées à l'unité.
+    status["mode"] = mode_state_to_command(status["mode"])
+    status["fan_mode"] = fan_state_to_command(status["fan_mode"])
+    status["swing"] = swing_state_to_command(status["swing"])
     status["on"] = status.get("power") == "on"
     return status
 
@@ -158,24 +178,17 @@ async def _set_clim(user, pwd, device_url, power=None, temperature=None,
     async with client:
         await client.login()
         devices = await client.get_devices()
-        current = None
-        for device in devices:
-            if device.device_url == device_url:
-                current = device.states
-                break
+        current = next((_extract_status(d) for d in devices if d.device_url == device_url), None)
         if current is None:
             raise ValueError(f"Climatisation {device_url} introuvable")
 
-        swing_param = swing if swing is not None else swing_state_to_command(
-            current["hlrrwifi:SwingState"].value
-        )
         params = [
-            power if power is not None else current["hlrrwifi:MainOperationState"].value,
-            temperature if temperature is not None else current["core:TargetTemperatureState"].value,
-            fan_mode if fan_mode is not None else current["hlrrwifi:FanSpeedState"].value,
-            mode if mode is not None else current["hlrrwifi:ModeChangeState"].value,
-            swing_param,
-            leave_home if leave_home is not None else current["hlrrwifi:LeaveHomeState"].value,
+            power if power is not None else current["power"],
+            temperature if temperature is not None else current["temperature"],
+            fan_mode if fan_mode is not None else current["fan_mode"],
+            mode if mode is not None else current["mode"],
+            swing if swing is not None else current["swing"],
+            leave_home if leave_home is not None else current["leave_home"],
         ]
         command = Command(name="globalControl", parameters=params)
         action = Action(device_url=device_url, commands=[command])
